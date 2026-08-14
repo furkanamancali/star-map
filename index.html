@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Overhead</title>
 </head>
 <body>
@@ -456,10 +456,13 @@ input[type="range"]::-moz-range-thumb {
   #deck { display: none; }
   #deck.open { display: flex; }
   #decktoggle { display: inline-flex; }
+  #arbtn { display: inline-flex; }
+  body:has(#deck.open) #arbtn { display: none; }
   #toast { bottom: 76px; }
 }
 
-#decktoggle {
+#decktoggle,
+#arbtn {
   display: none;
   position: fixed;
   z-index: 11;
@@ -470,6 +473,21 @@ input[type="range"]::-moz-range-thumb {
   background: var(--panel);
   color: var(--ink);
   padding: 9px 15px;
+}
+
+#arbtn {
+  right: auto;
+  left: 14px;
+}
+
+#arbtn[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--void);
+}
+
+/* keep both thumb buttons clear of the iOS home indicator */
+@supports (padding: max(0px)) {
+  #decktoggle, #arbtn { bottom: max(14px, env(safe-area-inset-bottom)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -507,6 +525,7 @@ input[type="range"]::-moz-range-thumb {
 </section>
 
 <button id="decktoggle" class="btn rail" aria-expanded="false">Controls</button>
+<button id="arbtn" class="btn rail" aria-pressed="false" title="Use device orientation to point at the sky">Point at sky</button>
 
 <div id="deck" class="rail">
   <div class="deck-row">
@@ -1117,6 +1136,10 @@ const S = {
   center: { alt: 45, az: 180 },
   fov: 60,
   tilt: false,
+  dev: null,                 // smoothed device basis {F, Rv, U} in ENU, while tilt is on
+  devTarget: null,           // latest raw reading, before smoothing
+  headOffset: 0,             // manual compass trim, deg
+  tiltNudged: false,
   limmag: 5.6,
   layers: { lines: true, names: true, milkyway: true, planets: true, deep: true, grid: false, ecliptic: false, realsky: false },
   selected: null,
@@ -1255,6 +1278,11 @@ function view() {
     return { mode: "dome", cx: W / 2, cy: H / 2, R: Math.max(2, span / 2 - 30), spin: S.spin };
   }
   const scale = (span / 2) / Math.tan(S.fov / 2 * D2R);
+  /* pointing at the sky: take the phone's own axes, so the picture rolls with the
+     handset and stays sane at the zenith, where alt/az alone would gimbal-lock */
+  if (S.tilt && S.dev) {
+    return { mode: "scope", cx: W / 2, cy: H / 2, scale, F: S.dev.F, Rv: S.dev.Rv, U: S.dev.U };
+  }
   const F = unit(S.center.alt, S.center.az);
   let Rv = [F[1], -F[0], 0];
   const rl = Math.hypot(Rv[0], Rv[1]);
@@ -1939,35 +1967,97 @@ document.getElementById("dsclose").onclick = () => {
    Interaction
    ============================================================ */
 let drag = null;
+const pointers = new Map();
+let pinch = null;
+
+function pinchSpan() {
+  const [p, q] = [...pointers.values()];
+  return {
+    d: Math.hypot(p.clientX - q.clientX, p.clientY - q.clientY),
+    x: (p.clientX + q.clientX) / 2,
+    y: (p.clientY + q.clientY) / 2
+  };
+}
 
 cv.addEventListener("pointerdown", e => {
   cv.setPointerCapture(e.pointerId);
-  drag = { x: e.clientX, y: e.clientY, moved: 0, spin: S.spin, alt: S.center.alt, az: S.center.az };
+  pointers.set(e.pointerId, e);
+  if (pointers.size === 2) {
+    const s = pinchSpan();
+    pinch = { d: Math.max(1, s.d), fov: S.fov, x: s.x, y: s.y };
+    drag = null;
+    cv.classList.remove("dragging");
+    return;
+  }
+  if (pointers.size > 2) return;
+  drag = {
+    x: e.clientX, y: e.clientY, moved: 0,
+    spin: S.spin, alt: S.center.alt, az: S.center.az, head: S.headOffset
+  };
   cv.classList.add("dragging");
 });
 
 cv.addEventListener("pointermove", e => {
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, e);
+
+  if (pinch && pointers.size >= 2) {
+    const s = pinchSpan();
+    const ratio = pinch.d / Math.max(1, s.d);
+    if (S.mode === "dome") {
+      /* spreading two fingers on the dome dives into the patch under them */
+      if (ratio < 0.75) {
+        const r = cv.getBoundingClientRect();
+        const aim = unproject(pinch.x - r.left, pinch.y - r.top, view());
+        if (aim) { S.center.alt = Math.max(0, Math.min(88, aim.alt)); S.center.az = aim.az; }
+        setMode("scope");
+        S.fov = 70;
+        pinch = { ...pinch, d: Math.max(1, s.d), fov: 70 };
+        toast("Scope mode — pinch to zoom, drag to look around");
+      }
+      return;
+    }
+    S.fov = Math.max(8, Math.min(120, pinch.fov * ratio));
+    return;
+  }
+
   if (!drag) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   drag.moved = Math.max(drag.moved, Math.hypot(dx, dy));
   if (S.mode === "dome") {
     S.spin = drag.spin + dx * 0.35;
+  } else if (S.tilt) {
+    /* the sensor keeps the aim; a sideways drag only trims the compass, which is
+       routinely a few degrees out indoors or near anything magnetic */
+    const k = S.fov / Math.min(W, H);
+    S.headOffset = rev(drag.head - dx * k);
+    if (!S.tiltNudged && Math.abs(dx) > 24) {
+      S.tiltNudged = true;
+      toast("Compass trimmed — tap “Stop pointing” for manual control");
+    }
   } else {
-    S.tilt = false;
-    syncTiltBtn();
     const k = S.fov / Math.min(W, H);
     S.center.az = rev(drag.az - dx * k);
     S.center.alt = Math.max(-25, Math.min(89, drag.alt + dy * k));
   }
 });
 
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+}
+
 cv.addEventListener("pointerup", e => {
   cv.classList.remove("dragging");
+  endPointer(e);
   if (drag && drag.moved < 5) pick(e.clientX, e.clientY);
   drag = null;
 });
 
-cv.addEventListener("pointercancel", () => { drag = null; cv.classList.remove("dragging"); });
+cv.addEventListener("pointercancel", e => {
+  endPointer(e);
+  drag = null;
+  cv.classList.remove("dragging");
+});
 
 cv.addEventListener("wheel", e => {
   e.preventDefault();
@@ -2005,7 +2095,7 @@ function setMode(m) {
   S.mode = m;
   $("mdome").setAttribute("aria-pressed", String(m === "dome"));
   $("mscope").setAttribute("aria-pressed", String(m === "scope"));
-  if (m === "dome") { S.tilt = false; syncTiltBtn(); }
+  if (m === "dome" && S.tilt) setTilt(false);
 }
 
 $("mdome").onclick = () => setMode("dome");
@@ -2088,56 +2178,169 @@ $("bhere").onclick = () => {
   );
 };
 
-/* ---- device orientation ---- */
-let tiltHandler = null;
+/* ============================================================
+   Point at sky — device orientation
+   ============================================================ */
 
-function syncTiltBtn() { $("btilt").setAttribute("aria-pressed", String(S.tilt)); }
+/* World frame is ENU (x east, y north, z up), the frame project() already speaks.
+   The W3C rotation matrix R = Rz(alpha)Rx(beta)Ry(gamma) carries device axes into
+   it, so its columns are the phone's own axes in ENU. The sky you are pointing at
+   is out the *back* of the phone: -Z. */
+function deviceBasis(alphaDeg, betaDeg, gammaDeg, screenDeg) {
+  const a = alphaDeg * D2R, b = betaDeg * D2R, g = gammaDeg * D2R;
+  const cA = Math.cos(a), sA = Math.sin(a);
+  const cB = Math.cos(b), sB = Math.sin(b);
+  const cG = Math.cos(g), sG = Math.sin(g);
+
+  const X = [cA * cG - sA * sB * sG, cG * sA + cA * sB * sG, -cB * sG];  // phone's right edge
+  const Y = [-cB * sA, cA * cB, sB];                                     // phone's top edge
+  const Z = [cA * sG + cG * sA * sB, sA * sG - cA * cG * sB, cB * cG];   // out of the screen
+
+  /* the browser has already rotated the page by screenDeg, so the view rotates the
+     other way about the sight line to put screen-up back where the eye expects it */
+  const s = screenDeg * D2R, cs = Math.cos(s), ss = Math.sin(s);
+  return {
+    F: [-Z[0], -Z[1], -Z[2]],
+    Rv: [X[0] * cs - Y[0] * ss, X[1] * cs - Y[1] * ss, X[2] * cs - Y[2] * ss],
+    U: [X[0] * ss + Y[0] * cs, X[1] * ss + Y[1] * cs, X[2] * ss + Y[2] * cs]
+  };
+}
+
+/* rotate about the vertical, i.e. add degrees to a direction's azimuth */
+function spinZ(v, deg) {
+  const c = cos(deg), s = sin(deg);
+  return [v[0] * c + v[1] * s, v[1] * c - v[0] * s, v[2]];
+}
+
+function norm3(v) {
+  const n = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / n, v[1] / n, v[2] / n];
+}
+
+/* smoothing drags the three axes out of square; square them up again */
+function orthonormalize(o) {
+  o.F = norm3(o.F);
+  const d = o.U[0] * o.F[0] + o.U[1] * o.F[1] + o.U[2] * o.F[2];
+  o.U = norm3([o.U[0] - d * o.F[0], o.U[1] - d * o.F[1], o.U[2] - d * o.F[2]]);
+  o.Rv = [
+    o.F[1] * o.U[2] - o.F[2] * o.U[1],
+    o.F[2] * o.U[0] - o.F[0] * o.U[2],
+    o.F[0] * o.U[1] - o.F[1] * o.U[0]
+  ];
+}
+
+/* sensors arrive at their own cadence and jitter by a degree or two; ease toward
+   the reading each frame instead, or every star shivers */
+function stepTilt(dt) {
+  if (!S.tilt || !S.devTarget) return;
+  const raw = S.devTarget;
+  const t = S.headOffset
+    ? { F: spinZ(raw.F, S.headOffset), Rv: spinZ(raw.Rv, S.headOffset), U: spinZ(raw.U, S.headOffset) }
+    : raw;
+  if (!S.dev) {
+    S.dev = { F: t.F.slice(), Rv: t.Rv.slice(), U: t.U.slice() };
+  } else {
+    const k = 1 - Math.exp(-dt / 70);
+    for (const key of ["F", "Rv", "U"]) {
+      for (let i = 0; i < 3; i++) S.dev[key][i] += (t[key][i] - S.dev[key][i]) * k;
+    }
+  }
+  orthonormalize(S.dev);
+  S.center.alt = Math.asin(Math.max(-1, Math.min(1, S.dev.F[2]))) * R2D;
+  S.center.az = rev(Math.atan2(S.dev.F[0], S.dev.F[1]) * R2D);
+}
+
+let tiltAbs = null, tiltRel = null, absSeen = false, warnedRelative = false;
+let wakeLock = null;
+
+function screenAngle() {
+  const so = screen.orientation;
+  if (so && typeof so.angle === "number") return so.angle;
+  return typeof window.orientation === "number" ? window.orientation : 0;
+}
+
+function tiltButtons() { return [$("btilt"), $("arbtn")].filter(Boolean); }
+
+function syncTiltBtn() {
+  tiltButtons().forEach(b => {
+    b.setAttribute("aria-pressed", String(S.tilt));
+    b.textContent = S.tilt ? "Stop pointing" : "Point at sky";
+  });
+}
+
+function readOrientation(ev, absolute) {
+  /* iOS keeps true heading on its own property; its alpha is relative to whatever
+     way the phone happened to face when the page loaded */
+  const wk = ev.webkitCompassHeading;
+  const heading = (typeof wk === "number" && !isNaN(wk)) ? 360 - wk : ev.alpha;
+  if (heading == null) return;
+  if (absolute || (typeof wk === "number" && !isNaN(wk))) absSeen = true;
+  S.devTarget = deviceBasis(heading, ev.beta || 0, ev.gamma || 0, screenAngle());
+  if (!absSeen && !warnedRelative) {
+    warnedRelative = true;
+    toast("No absolute compass here — drag sideways to line the sky up");
+  }
+}
 
 function startTilt() {
-  tiltHandler = ev => {
-    if (ev.alpha == null) return;
-    const alpha = (typeof ev.webkitCompassHeading === "number") ? 360 - ev.webkitCompassHeading : ev.alpha;
-    const scr = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-    const a = alpha * D2R, b = ev.beta * D2R, g = ev.gamma * D2R, s = scr * D2R;
-    const cA = Math.cos(a), sA = Math.sin(a), cB = Math.cos(b), sB = Math.sin(b), cG = Math.cos(g), sG = Math.sin(g);
-    /* R = Rz(alpha)Rx(beta)Ry(gamma), device -Z axis expressed in world ENU */
-    const m02 = -cA * sG - sA * sB * cG, m12 = -sA * sG + cA * sB * cG, m22 = -cB * cG;
-    let vx = -m02, vy = -m12, vz = -m22;
-    /* undo screen rotation about the viewing axis (only affects roll, ignore) */
-    void s;
-    const n = Math.hypot(vx, vy, vz) || 1;
-    vx /= n; vy /= n; vz /= n;
-    S.center.alt = Math.max(-25, Math.min(89, Math.asin(vz) * R2D));
-    S.center.az = rev(Math.atan2(vx, vy) * R2D);
-  };
-  window.addEventListener("deviceorientationabsolute", tiltHandler, true);
-  window.addEventListener("deviceorientation", tiltHandler, true);
+  absSeen = false;
+  tiltAbs = ev => readOrientation(ev, true);
+  /* the plain event is the fallback; once an absolute one turns up it wins, since
+     a relative alpha would keep dragging the heading back to an arbitrary zero */
+  tiltRel = ev => { if (!absSeen) readOrientation(ev, ev.absolute === true); };
+  window.addEventListener("deviceorientationabsolute", tiltAbs, true);
+  window.addEventListener("deviceorientation", tiltRel, true);
 }
 
 function stopTilt() {
-  if (!tiltHandler) return;
-  window.removeEventListener("deviceorientationabsolute", tiltHandler, true);
-  window.removeEventListener("deviceorientation", tiltHandler, true);
-  tiltHandler = null;
+  if (tiltAbs) window.removeEventListener("deviceorientationabsolute", tiltAbs, true);
+  if (tiltRel) window.removeEventListener("deviceorientation", tiltRel, true);
+  tiltAbs = tiltRel = null;
+  S.dev = S.devTarget = null;
 }
 
-$("btilt").onclick = async () => {
-  if (S.tilt) { S.tilt = false; stopTilt(); syncTiltBtn(); return; }
+async function keepAwake(on) {
+  try {
+    if (on && navigator.wakeLock && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } else if (!on && wakeLock) {
+      wakeLock.release();
+      wakeLock = null;
+    }
+  } catch (e) { /* screen will just dim as usual */ }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && S.tilt) keepAwake(true);
+});
+
+function setTilt(on) {
+  S.tilt = on;
+  if (on) startTilt(); else stopTilt();
+  keepAwake(on);
+  syncTiltBtn();
+}
+
+async function toggleTilt() {
+  if (S.tilt) { setTilt(false); toast("Back to manual — drag to look around"); return; }
   const DOE = window.DeviceOrientationEvent;
   if (!DOE) { toast("This device has no orientation sensors"); return; }
   if (typeof DOE.requestPermission === "function") {
     try {
       const res = await DOE.requestPermission();
       if (res !== "granted") { toast("Motion access denied"); return; }
-    } catch (e) { toast("Motion access unavailable"); return; }
+    } catch (e) { toast("Motion access needs a tap on a secure (https) page"); return; }
   }
-  S.tilt = true;
   setMode("scope");
   S.fov = 65;
-  startTilt();
-  syncTiltBtn();
-  toast("Point your device at the sky. Compass accuracy varies by device.");
-};
+  S.headOffset = 0;
+  S.tiltNudged = false;
+  setTilt(true);
+  toast("Hold your phone up to the sky. Pinch to zoom, drag to trim the compass.");
+}
+
+tiltButtons().forEach(b => { b.onclick = toggleTilt; });
 
 /* ---- search ---- */
 const dl = $("objectlist");
@@ -2173,7 +2376,7 @@ $("search").addEventListener("change", () => {
       if (n) {
         setMode("scope");
         S.fov = 50;
-        S.tilt = false; stopTilt(); syncTiltBtn();
+        if (S.tilt) setTilt(false);
         S.center.alt = Math.max(-10, Math.min(85, sa / n));
         S.center.az = rev(Math.atan2(sx / n, sy / n) * R2D);
         toast(CONST_NAMES[abbr] + (sa / n < 0 ? " is below your horizon right now" : " centred"));
@@ -2185,7 +2388,7 @@ $("search").addEventListener("change", () => {
   }
   setMode("scope");
   S.fov = Math.min(S.fov, 45);
-  S.tilt = false; stopTilt(); syncTiltBtn();
+  if (S.tilt) setTilt(false);
   S.center.alt = Math.max(-12, Math.min(88, hit.alt));
   S.center.az = hit.az;
   openDossier(hit);
@@ -2241,6 +2444,7 @@ function frame(now) {
     if (S.intro < 1) S.intro = Math.min(1, S.intro + dt / 1300);
 
     resize();
+    stepTilt(dt);
     buildScene();
     draw();
     updateReadout();
