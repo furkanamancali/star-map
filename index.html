@@ -469,30 +469,8 @@ input[type="range"]::-moz-range-thumb {
   color: var(--void);
 }
 
-#sensor {
-  display: none;
-  position: fixed;
-  z-index: 12;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 62px;
-  padding: 5px 9px;
-  border-radius: 8px;
-  font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-  max-width: 96vw;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0.72;
-  pointer-events: none;
-}
-
-#sensor.show { display: block; }
-
 @supports (padding: max(0px)) {
   #decktoggle, #arbtn { bottom: max(14px, env(safe-area-inset-bottom)); }
-  #sensor { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 52px); }
 }
 
 /* ---------- responsive ---------- */
@@ -555,7 +533,6 @@ body:has(#deck.open) #arbtn { display: none; }
 
 <button id="decktoggle" class="btn rail" aria-expanded="false">Controls</button>
 <button id="arbtn" class="btn rail" aria-pressed="false" title="Use device orientation to point at the sky">Point at sky</button>
-<div id="sensor" class="rail" aria-live="off">waiting for the orientation sensor…</div>
 
 <div id="deck" class="rail">
   <div class="deck-row">
@@ -2304,8 +2281,8 @@ function syncTiltBtn() {
   });
 }
 
-/* sensor diagnostics — the readout under the sky when pointing, so a phone that
-   misbehaves can say what it is actually reporting */
+/* the last raw reading is kept so the basis can be rebuilt when the page rotates
+   under a phone that is lying still and sending nothing new */
 let tiltEvents = 0, tiltStart = 0, tiltWatchdog = false, lastRaw = null;
 
 function readOrientation(ev, absolute) {
@@ -2314,10 +2291,7 @@ function readOrientation(ev, absolute) {
   const wk = ev.webkitCompassHeading;
   const heading = (typeof wk === "number" && !isNaN(wk)) ? 360 - wk : ev.alpha;
   tiltEvents++;
-  lastRaw = {
-    a: ev.alpha, b: ev.beta, g: ev.gamma, wk: wk,
-    scr: screenAngle(), abs: ev.absolute === true, kind: absolute ? "abs" : "rel"
-  };
+  lastRaw = { a: ev.alpha, b: ev.beta, g: ev.gamma, wk: wk, scr: screenAngle() };
   if (heading == null) return;
   if (absolute || (typeof wk === "number" && !isNaN(wk))) absHeading = true;
   S.devTarget = deviceBasis(heading, ev.beta || 0, ev.gamma || 0, lastRaw.scr);
@@ -2327,57 +2301,13 @@ function readOrientation(ev, absolute) {
   }
 }
 
-const num = (x, d) => (typeof x === "number" && !isNaN(x)) ? x.toFixed(d == null ? 0 : d) : "—";
-
-/* ?debug=1 keeps the line up even before you tap, which is the only way to tell a
-   button that never fired from a sensor that never reported */
-const DEBUG = /[?&]debug=1/.test(location.search);
-let permState = "untapped", lastError = "";
-
-window.addEventListener("error", ev => {
-  lastError = (ev.message || "script error") + (ev.lineno ? " @" + ev.lineno : "");
-});
-window.addEventListener("unhandledrejection", ev => {
-  lastError = "promise: " + ((ev.reason && ev.reason.message) || ev.reason || "?");
-});
-
-const BUILD = "b6";
-
-function envLine() {
-  const DOE = window.DeviceOrientationEvent;
-  return BUILD + " tilt:" + (S.tilt ? "on" : "off") +
-    " DOE:" + (DOE ? "yes" : "NO") +
-    " ask:" + (DOE && typeof DOE.requestPermission === "function" ? "yes" : "no") +
-    " perm:" + permState +
-    " https:" + (window.isSecureContext ? "yes" : "NO") +
-    " scr:" + screenAngle();
-}
-
-function updateSensor(now) {
-  const el = $("sensor");
-  if (!el) return;
-  if (!S.tilt && !DEBUG) { el.classList.remove("show"); return; }
-  el.classList.add("show");
-
-  if (lastError) { el.textContent = "JS ERROR: " + lastError + "  |  " + envLine(); return; }
-  if (!S.tilt) { el.textContent = envLine() + "  — tap “Point at sky”"; return; }
-
-  /* a phone can grant permission and then send nothing at all — Safari does this
-     when Motion & Orientation Access is off in Settings */
-  if (!tiltWatchdog && !tiltEvents && now - tiltStart > 1800) {
-    tiltWatchdog = true;
-    toast("No sensor data — iOS: Settings ▸ Apps ▸ Safari ▸ Motion & Orientation Access");
-  }
-
-  const r = lastRaw;
-  el.textContent = r
-    ? "ev " + tiltEvents + " " + r.kind + (absHeading ? "/true" : "/rel") +
-      "  α " + num(r.a, 1) + "  β " + num(r.b, 1) + "  γ " + num(r.g, 1) +
-      "  wk " + num(r.wk, 1) + "  scr " + r.scr +
-      "  →  alt " + num(S.center.alt, 1) + "  az " + num(S.center.az, 1) +
-      (S.headOffset ? "  trim " + num(S.headOffset, 1) : "")
-    : "waiting for the sensor — " + envLine() + " " +
-      Math.round((now - tiltStart) / 100) / 10 + "s";
+/* a phone can grant permission and then report nothing at all — Safari does this
+   when Motion & Orientation Access is switched off in Settings, and the silence is
+   indistinguishable from a sky that simply is not moving */
+function tiltWatch(now) {
+  if (!S.tilt || tiltWatchdog || tiltEvents || now - tiltStart < 1800) return;
+  tiltWatchdog = true;
+  toast("No sensor data — check Settings ▸ Apps ▸ Safari ▸ Motion & Orientation Access");
 }
 
 function startTilt() {
@@ -2443,22 +2373,17 @@ function setTilt(on) {
 }
 
 async function toggleTilt() {
-  permState = "tapped";
   if (S.tilt) { setTilt(false); toast("Back to manual — drag to look around"); return; }
   const DOE = window.DeviceOrientationEvent;
-  if (!DOE) { permState = "no-DOE"; toast("This device has no orientation sensors"); return; }
+  if (!DOE) { toast("This device has no orientation sensors"); return; }
   if (typeof DOE.requestPermission === "function") {
     try {
       const res = await DOE.requestPermission();
-      permState = String(res);
       if (res !== "granted") { toast("Motion access denied — reload the page to be asked again"); return; }
     } catch (e) {
-      permState = "threw:" + (e && e.name || "?");
       toast("Motion access needs a tap on a secure (https) page");
       return;
     }
-  } else {
-    permState = "not-required";
   }
   setMode("scope");
   S.fov = 65;
@@ -2573,7 +2498,7 @@ function frame(now) {
 
     resize();
     stepTilt(dt);
-    updateSensor(now);
+    tiltWatch(now);
     buildScene();
     draw();
     updateReadout();
