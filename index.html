@@ -480,6 +480,31 @@ input[type="range"]::-moz-range-thumb {
   left: 14px;
 }
 
+#sensor {
+  display: none;
+  position: fixed;
+  z-index: 11;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 62px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  max-width: 96vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+#sensor.show { display: block; }
+
+@supports (padding: max(0px)) {
+  #sensor { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 48px); }
+}
+
 #arbtn[aria-pressed="true"] {
   background: var(--ink);
   color: var(--void);
@@ -526,6 +551,7 @@ input[type="range"]::-moz-range-thumb {
 
 <button id="decktoggle" class="btn rail" aria-expanded="false">Controls</button>
 <button id="arbtn" class="btn rail" aria-pressed="false" title="Use device orientation to point at the sky">Point at sky</button>
+<div id="sensor" class="rail" aria-live="off">waiting for the orientation sensor…</div>
 
 <div id="deck" class="rail">
   <div class="deck-row">
@@ -2268,22 +2294,60 @@ function syncTiltBtn() {
   });
 }
 
+/* sensor diagnostics — the readout under the sky when pointing, so a phone that
+   misbehaves can say what it is actually reporting */
+let tiltEvents = 0, tiltStart = 0, tiltWatchdog = false, lastRaw = null;
+
 function readOrientation(ev, absolute) {
   /* iOS keeps true heading on its own property; its alpha is relative to whatever
      way the phone happened to face when the page loaded */
   const wk = ev.webkitCompassHeading;
   const heading = (typeof wk === "number" && !isNaN(wk)) ? 360 - wk : ev.alpha;
+  tiltEvents++;
+  lastRaw = {
+    a: ev.alpha, b: ev.beta, g: ev.gamma, wk: wk,
+    scr: screenAngle(), abs: ev.absolute === true, kind: absolute ? "abs" : "rel"
+  };
   if (heading == null) return;
   if (absolute || (typeof wk === "number" && !isNaN(wk))) absSeen = true;
-  S.devTarget = deviceBasis(heading, ev.beta || 0, ev.gamma || 0, screenAngle());
+  S.devTarget = deviceBasis(heading, ev.beta || 0, ev.gamma || 0, lastRaw.scr);
   if (!absSeen && !warnedRelative) {
     warnedRelative = true;
     toast("No absolute compass here — drag sideways to line the sky up");
   }
 }
 
+const num = (x, d) => (typeof x === "number" && !isNaN(x)) ? x.toFixed(d == null ? 0 : d) : "—";
+
+function updateSensor(now) {
+  const el = $("sensor");
+  if (!el) return;
+  if (!S.tilt) { el.classList.remove("show"); return; }
+  el.classList.add("show");
+
+  /* a phone can grant permission and then send nothing at all — Safari does this
+     when Motion & Orientation Access is off in Settings */
+  if (!tiltWatchdog && !tiltEvents && now - tiltStart > 1800) {
+    tiltWatchdog = true;
+    toast("No sensor data — iOS: Settings ▸ Apps ▸ Safari ▸ Motion & Orientation Access");
+  }
+
+  const r = lastRaw;
+  el.textContent = r
+    ? "ev " + tiltEvents + " " + r.kind + (absSeen ? "/abs" : "/rel") +
+      "  α " + num(r.a, 1) + "  β " + num(r.b, 1) + "  γ " + num(r.g, 1) +
+      "  wk " + num(r.wk, 1) + "  scr " + r.scr +
+      "  →  alt " + num(S.center.alt, 1) + "  az " + num(S.center.az, 1) +
+      (S.headOffset ? "  trim " + num(S.headOffset, 1) : "")
+    : "waiting for the orientation sensor…";
+}
+
 function startTilt() {
   absSeen = false;
+  tiltEvents = 0;
+  tiltWatchdog = false;
+  lastRaw = null;
+  tiltStart = performance.now();
   tiltAbs = ev => readOrientation(ev, true);
   /* the plain event is the fallback; once an absolute one turns up it wins, since
      a relative alpha would keep dragging the heading back to an arbitrary zero */
@@ -2314,6 +2378,22 @@ async function keepAwake(on) {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && S.tilt) keepAwake(true);
 });
+
+/* a phone lying still on its back sends no new readings, so re-derive the basis
+   when the page itself turns under it */
+function reapplyScreenAngle() {
+  if (!S.tilt || !lastRaw) return;
+  const wk = lastRaw.wk;
+  const heading = (typeof wk === "number" && !isNaN(wk)) ? 360 - wk : lastRaw.a;
+  if (heading == null) return;
+  lastRaw.scr = screenAngle();
+  S.devTarget = deviceBasis(heading, lastRaw.b || 0, lastRaw.g || 0, lastRaw.scr);
+}
+
+window.addEventListener("orientationchange", reapplyScreenAngle);
+if (screen.orientation && screen.orientation.addEventListener) {
+  screen.orientation.addEventListener("change", reapplyScreenAngle);
+}
 
 function setTilt(on) {
   S.tilt = on;
@@ -2445,6 +2525,7 @@ function frame(now) {
 
     resize();
     stepTilt(dt);
+    updateSensor(now);
     buildScene();
     draw();
     updateReadout();
