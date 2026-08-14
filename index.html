@@ -1,0 +1,2301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Overhead</title>
+</head>
+<body>
+<style>
+:root {
+  --void:        #05070d;
+  --void-2:      #0a0e18;
+  --panel:       rgba(11, 15, 25, 0.82);
+  --panel-solid: #0b0f19;
+  --edge:        rgba(186, 202, 238, 0.15);
+  --edge-strong: rgba(186, 202, 238, 0.30);
+  --ink:         #e9eaf2;
+  --dim:         #8d95af;
+  --dimmer:      #5d6580;
+  --brass:       #d9a441;
+  --brass-soft:  rgba(217, 164, 65, 0.16);
+  --cool:        #6fa8cf;
+  --shadow:      0 18px 48px rgba(0, 0, 0, 0.6);
+  --serif:       "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --sans:        system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono:        ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--void);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+button, input, select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* ---------- stage ---------- */
+
+/* viewport units rather than a height:100% chain — the host page owns the
+   ancestors and may not pass a height down */
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--void);
+}
+
+#sky {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  touch-action: none;
+  cursor: grab;
+}
+
+#sky.dragging { cursor: grabbing; }
+
+/* ---------- shared chrome ---------- */
+
+.rail {
+  position: fixed;
+  z-index: 10;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: var(--shadow);
+}
+
+.label {
+  font-family: var(--sans);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+}
+
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- masthead ---------- */
+
+#masthead {
+  top: 14px;
+  left: 14px;
+  padding: 12px 16px 13px;
+  border-radius: 2px;
+  max-width: min(340px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+#masthead h1 {
+  font-family: var(--serif);
+  font-size: 27px;
+  font-weight: 400;
+  letter-spacing: 0.015em;
+  margin: 0;
+  line-height: 1;
+}
+
+#masthead h1 em {
+  font-style: normal;
+  color: var(--brass);
+}
+
+.crest {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--edge);
+}
+
+.crest .label { padding-bottom: 2px; }
+
+#readout {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  align-items: baseline;
+}
+
+#readout .label { text-align: left; }
+
+#readout .val {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#readout .val.soft { color: var(--dim); }
+
+#skyphase {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+#skyphase .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cool);
+  box-shadow: 0 0 8px currentColor;
+  flex: none;
+}
+
+/* ---------- control deck ---------- */
+
+#deck {
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 28px));
+  border-radius: 2px;
+  padding: 11px 13px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.deck-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.deck-row.divider {
+  padding-top: 10px;
+  border-top: 1px solid var(--edge);
+}
+
+.spacer { flex: 1 1 auto; }
+
+.btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  padding: 6px 11px;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  color: var(--dim);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.btn:hover {
+  color: var(--ink);
+  border-color: var(--edge-strong);
+  background: rgba(186, 202, 238, 0.05);
+}
+
+.btn[aria-pressed="true"] {
+  color: var(--brass);
+  border-color: rgba(217, 164, 65, 0.5);
+  background: var(--brass-soft);
+}
+
+.btn.icon {
+  padding: 6px 9px;
+  font-family: var(--mono);
+  min-width: 34px;
+  text-align: center;
+}
+
+.btn.solid {
+  color: var(--void);
+  background: var(--brass);
+  border-color: var(--brass);
+  font-weight: 600;
+}
+
+.btn.solid:hover { background: #eab554; color: var(--void); }
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.seg .btn {
+  border: 0;
+  border-right: 1px solid var(--edge);
+  border-radius: 0;
+}
+
+.seg .btn:last-child { border-right: 0; }
+
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  padding: 4px 9px;
+}
+
+.field input,
+.field select {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  min-width: 0;
+}
+
+.field select option { background: var(--panel-solid); }
+.field input:focus, .field select:focus { outline: none; }
+.field input::placeholder { color: var(--dimmer); }
+.field:focus-within { border-color: var(--edge-strong); }
+
+#searchfield { flex: 1 1 190px; max-width: 280px; }
+#searchfield input { width: 100%; }
+
+#lat, #lon { width: 62px; }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  width: 108px;
+  height: 16px;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--edge-strong);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 2px;
+  background: var(--edge-strong);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: var(--brass);
+  border: 0;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--brass);
+  border: 0;
+}
+
+/* ---------- dossier ---------- */
+
+#dossier {
+  top: 14px;
+  right: 14px;
+  width: 268px;
+  border-radius: 2px;
+  padding: 13px 15px 14px;
+  display: none;
+  flex-direction: column;
+  gap: 11px;
+}
+
+#dossier.open { display: flex; }
+
+.dossier-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+#dsname {
+  font-family: var(--serif);
+  font-size: 21px;
+  line-height: 1.1;
+  margin: 0 0 3px;
+  font-weight: 400;
+  text-wrap: balance;
+}
+
+#dskind {
+  font-size: 11px;
+  color: var(--brass);
+  letter-spacing: 0.06em;
+}
+
+#dsclose {
+  flex: none;
+  background: transparent;
+  border: 0;
+  color: var(--dimmer);
+  font-family: var(--mono);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+#dsclose:hover { color: var(--ink); }
+
+#dstable {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 14px;
+  align-items: baseline;
+  border-top: 1px solid var(--edge);
+  padding-top: 11px;
+}
+
+#dstable .v {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  text-align: right;
+}
+
+#dsnote {
+  font-size: 11.5px;
+  color: var(--dim);
+  line-height: 1.5;
+  border-top: 1px solid var(--edge);
+  padding-top: 10px;
+}
+
+.horizon-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.chip-up   { background: rgba(111, 168, 207, 0.16); color: #8fc3e4; }
+.chip-down { background: rgba(186, 202, 238, 0.08); color: var(--dimmer); }
+
+/* ---------- toast ---------- */
+
+#toast {
+  position: fixed;
+  z-index: 20;
+  left: 50%;
+  bottom: 172px;
+  transform: translate(-50%, 8px);
+  background: var(--panel-solid);
+  border: 1px solid var(--edge-strong);
+  border-radius: 2px;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+}
+
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 720px) {
+  #masthead { padding: 10px 13px 11px; max-width: calc(100vw - 28px); }
+  #masthead h1 { font-size: 22px; }
+  #readout { grid-template-columns: auto 1fr; }
+  #dossier {
+    top: auto;
+    bottom: 14px;
+    right: 14px;
+    left: 14px;
+    width: auto;
+  }
+  #deck { display: none; }
+  #deck.open { display: flex; }
+  #decktoggle { display: inline-flex; }
+  #toast { bottom: 76px; }
+}
+
+#decktoggle {
+  display: none;
+  position: fixed;
+  z-index: 11;
+  bottom: 14px;
+  right: 14px;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 9px 15px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; }
+}
+</style>
+
+<div id="stage">
+  <canvas id="sky" aria-label="Live star map of the sky above your location"></canvas>
+</div>
+
+<header id="masthead" class="rail">
+  <div class="crest">
+    <h1>Over<em>head</em></h1>
+    <span class="label">Live sky</span>
+  </div>
+  <div id="readout">
+    <span class="label">Place</span><span class="val" id="rdplace">—</span>
+    <span class="label">Local</span><span class="val" id="rdtime">—</span>
+    <span class="label">Sidereal</span><span class="val soft" id="rdlst">—</span>
+  </div>
+  <div id="skyphase"><span class="dot"></span><span id="rdphase">—</span></div>
+</header>
+
+<section id="dossier" class="rail" aria-live="polite">
+  <div class="dossier-head">
+    <div>
+      <h2 id="dsname">—</h2>
+      <div id="dskind">—</div>
+    </div>
+    <button id="dsclose" aria-label="Close details">&times;</button>
+  </div>
+  <div id="dstable"></div>
+  <div id="dsnote"></div>
+</section>
+
+<button id="decktoggle" class="btn rail" aria-expanded="false">Controls</button>
+
+<div id="deck" class="rail">
+  <div class="deck-row">
+    <div class="seg" role="group" aria-label="View mode">
+      <button class="btn" id="mdome" aria-pressed="true">Dome</button>
+      <button class="btn" id="mscope" aria-pressed="false">Scope</button>
+    </div>
+    <button class="btn" id="btilt" aria-pressed="false" title="Use device orientation to point at the sky">Point at sky</button>
+    <div class="field" id="searchfield">
+      <span class="label">Find</span>
+      <input id="search" list="objectlist" placeholder="Vega, Saturn, M31…" autocomplete="off" aria-label="Find an object">
+      <datalist id="objectlist"></datalist>
+    </div>
+    <span class="spacer"></span>
+    <button class="btn solid" id="bhere">Use my location</button>
+  </div>
+
+  <div class="deck-row divider">
+    <button class="btn icon" id="bplay" aria-label="Pause time">&#10073;&#10073;</button>
+    <div class="seg" role="group" aria-label="Time rate">
+      <button class="btn" data-rate="1" aria-pressed="true">1&times;</button>
+      <button class="btn" data-rate="60" aria-pressed="false">1m/s</button>
+      <button class="btn" data-rate="3600" aria-pressed="false">1h/s</button>
+      <button class="btn" data-rate="86400" aria-pressed="false">1d/s</button>
+    </div>
+    <button class="btn" id="bnow">Now</button>
+    <span class="spacer"></span>
+    <div class="field">
+      <span class="label">Lat</span><input id="lat" class="num" inputmode="decimal" aria-label="Latitude">
+      <span class="label">Lon</span><input id="lon" class="num" inputmode="decimal" aria-label="Longitude">
+    </div>
+    <div class="field">
+      <select id="preset" aria-label="Preset location">
+        <option value="">City…</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="deck-row divider">
+    <button class="btn" data-layer="lines" aria-pressed="true">Figures</button>
+    <button class="btn" data-layer="names" aria-pressed="true">Names</button>
+    <button class="btn" data-layer="milkyway" aria-pressed="true">Milky Way</button>
+    <button class="btn" data-layer="planets" aria-pressed="true">Planets</button>
+    <button class="btn" data-layer="deep" aria-pressed="true">Deep sky</button>
+    <button class="btn" data-layer="grid" aria-pressed="false">Grid</button>
+    <button class="btn" data-layer="ecliptic" aria-pressed="false">Ecliptic</button>
+    <button class="btn" data-layer="realsky" aria-pressed="false" title="Let daylight and twilight wash out the stars">Real sky</button>
+    <span class="spacer"></span>
+    <div class="field">
+      <span class="label">Limit mag</span>
+      <input type="range" id="limmag" min="3" max="6.5" step="0.1" value="5.6" aria-label="Limiting magnitude">
+      <span class="num" id="limmagval" style="font-size:12px;width:26px;text-align:right">5.6</span>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="status"></div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   Star catalogue — J2000, [key, proper name, RA hours, Dec deg, V mag, B-V]
+   ============================================================ */
+const STARS = [
+  ["alUMa","Dubhe",11.062,61.751,1.79,1.07],["beUMa","Merak",11.031,56.382,2.37,0.03],
+  ["gaUMa","Phecda",11.897,53.695,2.44,0.04],["deUMa","Megrez",12.257,57.033,3.31,0.08],
+  ["epUMa","Alioth",12.900,55.960,1.77,-0.02],["zeUMa","Mizar",13.399,54.925,2.27,0.02],
+  ["etUMa","Alkaid",13.792,49.313,1.86,-0.19],
+
+  ["alUMi","Polaris",2.530,89.264,1.98,0.60],["beUMi","Kochab",14.845,74.156,2.08,1.47],
+  ["gaUMi","Pherkad",15.345,71.834,3.05,0.05],["epUMi","",16.766,82.037,4.21,0.89],
+  ["zeUMi","",15.734,77.794,4.32,0.04],["etUMi","",16.291,75.755,4.95,0.37],
+  ["deUMi","",17.537,86.586,4.36,0.02],
+
+  ["alCas","Schedar",0.675,56.537,2.24,1.17],["beCas","Caph",0.153,59.150,2.27,0.34],
+  ["gaCas","",0.945,60.717,2.47,-0.15],["deCas","Ruchbah",1.430,60.235,2.68,0.13],
+  ["epCas","Segin",1.907,63.670,3.38,-0.15],
+
+  ["alCep","Alderamin",21.310,62.586,2.45,0.22],["beCep","Alfirk",21.478,70.561,3.23,-0.22],
+  ["gaCep","Errai",23.656,77.632,3.21,1.03],["zeCep","",22.181,58.201,3.35,1.56],
+  ["deCep","",22.482,58.415,4.07,0.66],["ioCep","",22.828,66.200,3.52,1.05],
+
+  ["alDra","Thuban",14.073,64.376,3.65,-0.05],["beDra","Rastaban",17.507,52.301,2.79,0.95],
+  ["gaDra","Eltanin",17.944,51.489,2.23,1.52],["deDra","",19.209,67.661,3.07,1.00],
+  ["epDra","",19.798,70.268,3.83,0.89],["zeDra","",17.146,65.715,3.17,-0.12],
+  ["etDra","",16.400,61.514,2.73,0.91],["ioDra","Edasich",15.416,58.966,3.29,1.17],
+  ["xiDra","",17.892,56.873,3.75,1.18],
+
+  ["alOri","Betelgeuse",5.919,7.407,0.50,1.85],["beOri","Rigel",5.242,-8.202,0.13,-0.03],
+  ["gaOri","Bellatrix",5.418,6.350,1.64,-0.22],["deOri","Mintaka",5.533,-0.299,2.23,-0.18],
+  ["epOri","Alnilam",5.604,-1.202,1.69,-0.18],["zeOri","Alnitak",5.679,-1.943,1.77,-0.20],
+  ["kaOri","Saiph",5.796,-9.670,2.06,-0.17],["laOri","Meissa",5.585,9.934,3.39,-0.16],
+  ["ioOri","Hatysa",5.590,-5.910,2.77,-0.21],["piOri","",4.831,6.961,3.19,0.45],
+
+  ["alCMa","Sirius",6.752,-16.716,-1.46,0.01],["beCMa","Mirzam",6.378,-17.956,1.98,-0.24],
+  ["deCMa","Wezen",7.140,-26.393,1.83,0.67],["epCMa","Adhara",6.977,-28.972,1.50,-0.21],
+  ["etCMa","Aludra",7.402,-29.303,2.45,-0.08],["siCMa","",7.030,-27.935,3.47,1.73],
+
+  ["alCMi","Procyon",7.655,5.225,0.34,0.42],["beCMi","Gomeisa",7.452,8.289,2.89,-0.09],
+
+  ["alTau","Aldebaran",4.599,16.509,0.85,1.54],["beTau","Elnath",5.438,28.608,1.65,-0.13],
+  ["zeTau","",5.627,21.143,3.00,-0.15],["thTau","",4.477,15.871,3.40,0.95],
+  ["epTau","",4.478,19.180,3.53,1.01],["gaTau","",4.330,15.628,3.65,0.98],
+  ["laTau","",4.011,12.490,3.47,-0.12],["etTau","Alcyone",3.791,24.105,2.87,-0.09],
+
+  ["alGem","Castor",7.577,31.888,1.58,0.03],["beGem","Pollux",7.755,28.026,1.14,1.00],
+  ["gaGem","Alhena",6.629,16.399,1.93,0.00],["deGem","Wasat",7.335,21.982,3.53,0.37],
+  ["epGem","Mebsuta",6.732,25.131,3.06,1.40],["muGem","Tejat",6.383,22.514,2.87,1.64],
+  ["etGem","Propus",6.248,22.507,3.28,1.60],["xiGem","",6.755,12.896,3.36,0.43],
+  ["kaGem","",7.740,24.398,3.57,0.93],
+
+  ["alAur","Capella",5.278,45.998,0.08,0.80],["beAur","Menkalinan",5.995,44.947,1.90,0.08],
+  ["thAur","",5.996,37.213,2.62,-0.08],["ioAur","Hassaleh",4.950,33.166,2.69,1.53],
+  ["epAur","Almaaz",5.033,43.823,3.03,0.54],["etAur","Haedus",5.108,41.234,3.17,-0.15],
+
+  ["alPer","Mirfak",3.405,49.861,1.79,0.48],["bePer","Algol",3.136,40.956,2.12,-0.05],
+  ["gaPer","",3.080,53.506,2.93,0.70],["dePer","",3.715,47.788,3.01,-0.13],
+  ["epPer","",3.964,40.010,2.89,-0.20],["zePer","",3.902,31.884,2.85,0.26],
+  ["roPer","",3.086,38.840,3.39,1.65],
+
+  ["alAnd","Alpheratz",0.140,29.091,2.06,-0.11],["beAnd","Mirach",1.162,35.621,2.06,1.58],
+  ["gaAnd","Almach",2.065,42.330,2.10,1.37],["deAnd","",0.655,30.861,3.27,1.28],
+
+  ["alPeg","Markab",23.079,15.205,2.48,-0.04],["bePeg","Scheat",23.063,28.083,2.42,1.67],
+  ["gaPeg","Algenib",0.220,15.184,2.83,-0.19],["epPeg","Enif",21.736,9.875,2.39,1.53],
+  ["etPeg","Matar",22.717,30.221,2.94,0.86],["zePeg","Homam",22.691,10.831,3.40,-0.09],
+  ["thPeg","Biham",22.170,6.198,3.53,0.09],
+
+  ["alAri","Hamal",2.119,23.462,2.00,1.15],["beAri","Sheratan",1.911,20.808,2.64,0.13],
+  ["gaAri","Mesarthim",1.892,19.294,3.88,0.02],["41Ari","",2.833,27.261,3.61,-0.10],
+
+  ["alTri","",1.885,29.579,3.42,0.49],["beTri","",2.160,34.987,3.00,0.14],
+  ["gaTri","",2.290,33.847,4.01,0.02],
+
+  ["alCet","Menkar",3.038,4.090,2.53,1.63],["beCet","Diphda",0.726,-17.987,2.04,1.02],
+  ["gaCet","",2.722,3.236,3.47,0.09],["etCet","",1.401,-10.115,3.45,1.16],
+  ["taCet","",1.734,-15.937,3.50,0.73],["omiCet","Mira",2.322,-2.977,3.04,1.42],
+  ["zeCet","Baten Kaitos",1.858,-10.335,3.73,1.14],
+
+  ["etPsc","",1.525,15.346,3.62,0.97],["gaPsc","",23.286,3.282,3.69,0.92],
+  ["alPsc","Alrescha",2.034,2.764,3.82,0.03],["omPsc","",23.982,6.863,4.01,0.42],
+  ["ioPsc","",23.666,5.627,4.13,0.51],
+
+  ["alAqr","Sadalmelik",22.097,-0.320,2.95,0.98],["beAqr","Sadalsuud",21.526,-5.571,2.90,0.83],
+  ["deAqr","Skat",22.911,-15.821,3.27,0.05],["zeAqr","",22.481,-0.020,3.65,0.40],
+  ["gaAqr","Sadachbia",22.360,-1.387,3.84,0.05],
+
+  ["alCap","Algedi",20.300,-12.545,3.57,0.91],["beCap","Dabih",20.350,-14.781,3.05,0.79],
+  ["deCap","Deneb Algedi",21.784,-16.127,2.85,0.18],["gaCap","Nashira",21.668,-16.662,3.68,0.32],
+
+  ["alCyg","Deneb",20.690,45.280,1.25,0.09],["beCyg","Albireo",19.512,27.960,3.08,1.13],
+  ["gaCyg","Sadr",20.370,40.257,2.23,0.68],["deCyg","",19.750,45.131,2.87,-0.05],
+  ["epCyg","Aljanah",20.770,33.970,2.48,1.03],["zeCyg","",21.215,30.227,3.20,0.99],
+  ["ioCyg","",19.494,51.730,3.79,0.14],["kaCyg","",19.286,53.368,3.77,0.96],
+
+  ["alLyr","Vega",18.615,38.784,0.03,0.00],["beLyr","Sheliak",18.834,33.363,3.52,0.00],
+  ["gaLyr","Sulafat",18.982,32.690,3.24,-0.05],["deLyr","",18.907,36.899,4.30,1.68],
+  ["zeLyr","",18.746,37.605,4.36,0.19],["epLyr","",18.740,39.670,4.59,0.19],
+
+  ["alAql","Altair",19.846,8.868,0.77,0.22],["gaAql","Tarazed",19.771,10.613,2.72,1.52],
+  ["beAql","Alshain",19.921,6.407,3.71,0.86],["deAql","",19.425,3.115,3.36,0.32],
+  ["zeAql","",19.090,13.863,2.99,0.01],["thAql","",20.188,-0.821,3.23,-0.07],
+  ["laAql","",19.404,-4.883,3.43,-0.09],
+
+  ["alDel","Sualocin",20.660,15.912,3.77,-0.06],["beDel","Rotanev",20.626,14.595,3.63,0.43],
+  ["gaDel","",20.777,16.124,4.27,0.44],["deDel","",20.727,15.075,4.43,0.31],
+  ["epDel","",20.558,11.303,4.03,-0.09],
+
+  ["alBoo","Arcturus",14.261,19.182,-0.05,1.23],["beBoo","Nekkar",15.032,40.390,3.49,0.97],
+  ["gaBoo","Seginus",14.535,38.308,3.03,0.19],["epBoo","Izar",14.750,27.074,2.37,0.97],
+  ["etBoo","Muphrid",13.912,18.398,2.68,0.58],["deBoo","",15.258,33.315,3.47,0.95],
+  ["zeBoo","",14.685,13.728,3.78,0.05],
+
+  ["alCrB","Alphecca",15.578,26.715,2.22,-0.02],["beCrB","Nusakan",15.464,29.106,3.66,0.28],
+  ["gaCrB","",15.712,26.296,3.81,0.02],["thCrB","",15.548,31.359,4.14,-0.13],
+  ["epCrB","",15.960,26.878,4.14,1.23],["deCrB","",15.822,26.068,4.62,0.80],
+  ["ioCrB","",16.024,29.851,4.99,0.05],
+
+  ["alHer","Rasalgethi",17.244,14.390,3.31,1.44],["beHer","Kornephoros",16.504,21.490,2.77,0.94],
+  ["zeHer","",16.688,31.602,2.81,0.65],["etHer","",16.715,38.922,3.53,0.92],
+  ["piHer","",17.251,36.809,3.16,1.44],["deHer","Sarin",17.251,24.839,3.12,0.08],
+  ["epHer","",17.005,30.926,3.92,0.00],
+
+  ["alOph","Rasalhague",17.582,12.560,2.08,0.16],["beOph","Cebalrai",17.725,4.567,2.76,1.16],
+  ["deOph","Yed Prior",16.239,-3.694,2.73,1.58],["epOph","Yed Posterior",16.310,-4.693,3.24,0.96],
+  ["zeOph","",16.620,-10.567,2.56,0.02],["etOph","Sabik",17.173,-15.725,2.43,0.06],
+  ["kaOph","",16.961,9.375,3.20,1.16],
+
+  ["alSer","Unukalhai",15.738,6.426,2.63,1.17],["beSer","",15.770,15.422,3.65,0.06],
+  ["epSer","",15.847,4.478,3.71,0.26],["deSer","",15.580,10.539,3.80,0.26],
+  ["muSer","",15.827,-3.430,3.53,0.02],["etSer","",18.355,-2.899,3.23,0.94],
+  ["xiSer","",17.626,-15.399,3.54,0.26],
+
+  ["alSco","Antares",16.490,-26.432,1.09,1.83],["beSco","Acrab",16.090,-19.805,2.62,-0.07],
+  ["deSco","Dschubba",16.005,-22.622,2.32,-0.12],["piSco","",15.981,-26.114,2.89,-0.19],
+  ["siSco","Alniyat",16.353,-25.593,2.89,0.13],["taSco","Paikauhale",16.598,-28.216,2.82,-0.20],
+  ["epSco","Larawag",16.836,-34.293,2.29,1.14],["muSco","Xamidimura",16.865,-38.048,3.00,-0.20],
+  ["zeSco","",16.906,-42.361,3.62,1.40],["etSco","",17.203,-43.239,3.33,0.41],
+  ["thSco","Sargas",17.622,-42.998,1.86,0.40],["ioSco","",17.793,-40.127,3.03,0.51],
+  ["kaSco","Girtab",17.708,-39.030,2.41,-0.20],["laSco","Shaula",17.560,-37.104,1.62,-0.22],
+  ["upSco","Lesath",17.512,-37.296,2.70,-0.22],
+
+  ["epSgr","Kaus Australis",18.403,-34.385,1.85,-0.03],["siSgr","Nunki",18.921,-26.297,2.05,-0.22],
+  ["deSgr","Kaus Media",18.350,-29.828,2.70,1.38],["laSgr","Kaus Borealis",18.466,-25.422,2.81,1.04],
+  ["zeSgr","Ascella",19.044,-29.880,2.60,0.08],["phSgr","",18.762,-26.991,3.17,-0.11],
+  ["taSgr","",19.116,-27.670,3.32,1.19],["gaSgr","Alnasl",18.097,-30.424,2.99,1.00],
+  ["piSgr","",19.163,-21.024,2.89,0.34],
+
+  ["alLeo","Regulus",10.139,11.967,1.35,-0.11],["beLeo","Denebola",11.818,14.572,2.14,0.09],
+  ["gaLeo","Algieba",10.333,19.841,2.08,1.13],["deLeo","Zosma",11.235,20.524,2.56,0.13],
+  ["epLeo","Algenubi",9.764,23.774,2.98,0.81],["thLeo","Chertan",11.237,15.430,3.33,0.00],
+  ["etLeo","",10.278,16.763,3.52,-0.03],["zeLeo","Adhafera",10.278,23.417,3.44,0.31],
+  ["muLeo","Rasalas",9.879,26.007,3.88,1.22],
+
+  ["alCnc","Acubens",8.975,11.858,4.25,0.14],["beCnc","Tarf",8.275,9.186,3.52,1.48],
+  ["gaCnc","Asellus Borealis",8.722,21.469,4.66,0.01],["deCnc","Asellus Australis",8.745,18.154,3.94,1.08],
+  ["ioCnc","",8.778,28.760,4.02,1.01],
+
+  ["alVir","Spica",13.420,-11.161,0.97,-0.24],["beVir","Zavijava",11.845,1.765,3.60,0.52],
+  ["gaVir","Porrima",12.694,-1.449,2.74,0.36],["deVir","Auva",12.927,3.397,3.38,1.57],
+  ["epVir","Vindemiatrix",13.036,10.959,2.83,0.94],["zeVir","Heze",13.579,-0.596,3.38,0.11],
+
+  ["alLib","Zubenelgenubi",14.848,-16.042,2.75,0.15],["beLib","Zubeneschamali",15.283,-9.383,2.61,-0.11],
+  ["gaLib","",15.596,-14.789,3.91,1.01],["siLib","Brachium",15.067,-25.282,3.29,1.70],
+
+  ["gaCrv","Gienah",12.263,-17.542,2.59,-0.11],["beCrv","Kraz",12.573,-23.397,2.65,0.89],
+  ["deCrv","Algorab",12.497,-16.516,2.95,-0.05],["epCrv","Minkar",12.169,-22.620,3.02,1.33],
+
+  ["alHya","Alphard",9.460,-8.659,1.98,1.44],["gaHya","",13.315,-23.172,3.00,0.92],
+  ["zeHya","",8.925,5.946,3.11,1.00],["epHya","",8.779,6.419,3.38,0.68],
+  ["nuHya","",10.827,-16.194,3.11,1.25],
+
+  ["alCen","Rigil Kentaurus",14.660,-60.835,-0.27,0.71],["beCen","Hadar",14.064,-60.373,0.61,-0.23],
+  ["gaCen","Muhlifain",12.692,-48.960,2.17,-0.01],["deCen","",12.140,-50.722,2.60,-0.12],
+  ["epCen","",13.665,-53.466,2.30,-0.22],["zeCen","",13.926,-47.288,2.55,-0.22],
+  ["etCen","",14.596,-42.158,2.31,-0.19],["thCen","Menkent",14.111,-36.370,2.06,1.01],
+  ["ioCen","",13.343,-36.712,2.75,0.06],
+
+  ["alCru","Acrux",12.443,-63.099,0.77,-0.24],["beCru","Mimosa",12.795,-59.689,1.25,-0.24],
+  ["gaCru","Gacrux",12.519,-57.113,1.63,1.59],["deCru","Imai",12.253,-58.749,2.79,-0.23],
+  ["epCru","Ginan",12.356,-60.401,3.59,1.42],
+
+  ["alCar","Canopus",6.399,-52.696,-0.72,0.15],["beCar","Miaplacidus",9.220,-69.717,1.67,0.07],
+  ["epCar","Avior",8.375,-59.510,1.86,1.20],["ioCar","Aspidiske",9.285,-59.275,2.21,0.18],
+  ["upCar","",9.785,-65.072,2.97,0.28],["thCar","",10.716,-64.394,2.76,-0.22],
+
+  ["gaVel","Regor",8.158,-47.337,1.78,-0.25],["deVel","Alsephina",8.745,-54.709,1.96,0.04],
+  ["laVel","Suhail",9.133,-43.433,2.21,1.66],["kaVel","Markeb",9.368,-55.011,2.50,-0.18],
+
+  ["zePup","Naos",8.060,-40.003,2.25,-0.27],["piPup","Ahadi",7.286,-37.097,2.70,1.62],
+  ["roPup","Tureis",8.126,-24.304,2.81,0.43],["taPup","",6.833,-50.615,2.93,1.20],
+
+  ["alEri","Achernar",1.629,-57.237,0.46,-0.16],["beEri","Cursa",5.131,-5.086,2.79,0.13],
+  ["thEri","Acamar",2.971,-40.305,2.88,0.13],["gaEri","Zaurak",3.968,-13.509,2.95,1.59],
+
+  ["alLep","Arneb",5.545,-17.822,2.58,0.21],["beLep","Nihal",5.470,-20.759,2.84,0.82],
+  ["epLep","",5.091,-22.371,3.19,1.46],["muLep","",5.213,-16.205,3.29,-0.11],
+
+  ["alPsA","Fomalhaut",22.961,-29.622,1.16,0.09],
+  ["alGru","Alnair",22.137,-46.961,1.74,-0.07],["beGru","Tiaki",22.711,-46.885,2.11,1.60],
+  ["alPhe","Ankaa",0.438,-42.306,2.39,1.09],["alPav","Peacock",20.427,-56.735,1.94,-0.12],
+  ["alTrA","Atria",16.811,-69.028,1.91,1.44],["beTrA","",15.919,-63.431,2.85,0.29],
+  ["gaTrA","",15.315,-68.679,2.87,0.01],
+
+  ["alCVn","Cor Caroli",12.934,38.318,2.89,-0.12],["beCVn","Chara",12.562,41.357,4.24,0.59]
+];
+
+/* constellation stick figures — polylines over star keys */
+const FIGURES = [
+  ["UMa",[["etUMa","zeUMa","epUMa","deUMa","gaUMa","beUMa","alUMa","deUMa"]]],
+  ["UMi",[["alUMi","deUMi","epUMi","zeUMi","beUMi","gaUMi","etUMi","zeUMi"]]],
+  ["Cas",[["epCas","deCas","gaCas","alCas","beCas"]]],
+  ["Cep",[["alCep","beCep","gaCep","ioCep","zeCep","alCep"],["zeCep","deCep"]]],
+  ["Dra",[["alDra","ioDra","etDra","zeDra","xiDra","beDra","gaDra","xiDra"],["xiDra","deDra","epDra"]]],
+  ["Ori",[["deOri","epOri","zeOri"],["gaOri","alOri"],["gaOri","deOri"],["alOri","zeOri"],
+          ["beOri","deOri"],["zeOri","kaOri"],["alOri","laOri","gaOri"],["epOri","ioOri"]]],
+  ["CMa",[["alCMa","beCMa"],["alCMa","siCMa","epCMa"],["siCMa","deCMa","etCMa"]]],
+  ["CMi",[["alCMi","beCMi"]]],
+  ["Tau",[["laTau","gaTau","deTau","epTau","beTau"],["gaTau","thTau","alTau","zeTau"]]],
+  ["Gem",[["alGem","epGem","muGem","etGem"],["alGem","beGem"],["beGem","kaGem","deGem","gaGem"],["gaGem","xiGem"]]],
+  ["Aur",[["alAur","beAur","thAur","beTau","ioAur","alAur"],["alAur","epAur","etAur"]]],
+  ["Per",[["gaPer","alPer","dePer","epPer","zePer"],["alPer","bePer","roPer"]]],
+  ["And",[["alAnd","deAnd","beAnd","gaAnd"]]],
+  ["Peg",[["alAnd","bePeg","alPeg","gaPeg","alAnd"],["bePeg","etPeg"],["alPeg","zePeg","thPeg","epPeg"]]],
+  ["Ari",[["41Ari","alAri","beAri","gaAri"]]],
+  ["Tri",[["alTri","beTri","gaTri","alTri"]]],
+  ["Cet",[["alCet","gaCet","zeCet","taCet","beCet"],["taCet","etCet"],["zeCet","omiCet"]]],
+  ["Psc",[["etPsc","alPsc"],["gaPsc","ioPsc","omPsc","alPsc"]]],
+  ["Aqr",[["beAqr","alAqr","gaAqr","zeAqr","deAqr"]]],
+  ["Cap",[["alCap","beCap","deCap","gaCap","alCap"]]],
+  ["Cyg",[["alCyg","gaCyg","beCyg"],["deCyg","gaCyg","epCyg"],["deCyg","ioCyg","kaCyg"],["epCyg","zeCyg"]]],
+  ["Lyr",[["alLyr","zeLyr","deLyr","gaLyr","beLyr","zeLyr"],["alLyr","epLyr"]]],
+  ["Aql",[["zeAql","gaAql","alAql","beAql"],["alAql","deAql","laAql"],["beAql","thAql","laAql"]]],
+  ["Del",[["gaDel","alDel","beDel","deDel","gaDel"],["beDel","epDel"]]],
+  ["Boo",[["etBoo","alBoo","epBoo","deBoo","beBoo","gaBoo","alBoo"],["alBoo","zeBoo"]]],
+  ["CrB",[["thCrB","beCrB","alCrB","gaCrB","deCrB","epCrB","ioCrB"]]],
+  ["Her",[["beHer","zeHer","etHer","piHer","epHer","zeHer"],["beHer","alHer","deHer","epHer"]]],
+  ["Oph",[["alOph","kaOph","deOph","epOph","zeOph","etOph","beOph","alOph"]]],
+  ["Ser",[["muSer","epSer","alSer","deSer","beSer"],["etSer","xiSer"]]],
+  ["Sco",[["beSco","deSco","piSco"],["deSco","siSco","alSco","taSco","epSco","muSco","zeSco","etSco","thSco","ioSco","kaSco","laSco","upSco"]]],
+  ["Sgr",[["gaSgr","deSgr","laSgr","phSgr","siSgr","taSgr","zeSgr","epSgr","gaSgr"],
+          ["deSgr","epSgr"],["phSgr","zeSgr"],["siSgr","piSgr"]]],
+  ["Leo",[["epLeo","muLeo","zeLeo","gaLeo","etLeo","alLeo"],["alLeo","thLeo","beLeo","deLeo","gaLeo"],["thLeo","deLeo"]]],
+  ["Cnc",[["ioCnc","gaCnc","deCnc","beCnc"],["deCnc","alCnc"]]],
+  ["Vir",[["epVir","deVir","gaVir","beVir"],["deVir","zeVir","alVir"]]],
+  ["Lib",[["alLib","beLib","gaLib"],["alLib","siLib"]]],
+  ["Crv",[["gaCrv","deCrv","beCrv","epCrv","gaCrv"]]],
+  ["Hya",[["epHya","zeHya","alHya","nuHya","gaHya"]]],
+  ["Cen",[["alCen","beCen","epCen","zeCen","gaCen","deCen"],["epCen","etCen","thCen"],["zeCen","ioCen"]]],
+  ["Cru",[["alCru","gaCru"],["beCru","deCru"]]],
+  ["Car",[["beCar","upCar","thCar"],["beCar","ioCar","epCar"]]],
+  ["Vel",[["laVel","gaVel","deVel","kaVel"]]],
+  ["Pup",[["taPup","piPup","zePup","roPup"]]],
+  ["Lep",[["muLep","alLep","beLep","epLep","muLep"]]],
+  ["Gru",[["alGru","beGru"]]],
+  ["TrA",[["alTrA","beTrA","gaTrA","alTrA"]]],
+  ["CVn",[["alCVn","beCVn"]]]
+];
+
+const CONST_NAMES = {
+  UMa:"Ursa Major",UMi:"Ursa Minor",Cas:"Cassiopeia",Cep:"Cepheus",Dra:"Draco",Ori:"Orion",
+  CMa:"Canis Major",CMi:"Canis Minor",Tau:"Taurus",Gem:"Gemini",Aur:"Auriga",Per:"Perseus",
+  And:"Andromeda",Peg:"Pegasus",Ari:"Aries",Tri:"Triangulum",Cet:"Cetus",Psc:"Pisces",
+  Aqr:"Aquarius",Cap:"Capricornus",Cyg:"Cygnus",Lyr:"Lyra",Aql:"Aquila",Del:"Delphinus",
+  Boo:"Bootes",CrB:"Corona Borealis",Her:"Hercules",Oph:"Ophiuchus",Ser:"Serpens",
+  Sco:"Scorpius",Sgr:"Sagittarius",Leo:"Leo",Cnc:"Cancer",Vir:"Virgo",Lib:"Libra",
+  Crv:"Corvus",Hya:"Hydra",Cen:"Centaurus",Cru:"Crux",Car:"Carina",Vel:"Vela",Pup:"Puppis",
+  Eri:"Eridanus",Lep:"Lepus",PsA:"Piscis Austrinus",Gru:"Grus",Phe:"Phoenix",Pav:"Pavo",
+  TrA:"Triangulum Australe",CVn:"Canes Venatici",Tuc:"Tucana",Dor:"Dorado"
+};
+
+/* deep sky — [name, kind, RA h, Dec deg, mag, note] */
+const DEEP = [
+  ["M31","Galaxy",0.712,41.269,3.4,"Andromeda Galaxy — the farthest thing most eyes can see unaided, 2.5 million light years out."],
+  ["M42","Nebula",5.588,-5.391,4.0,"The Orion Nebula, a stellar nursery hanging in Orion's sword."],
+  ["M45","Open cluster",3.790,24.117,1.6,"The Pleiades. Six or seven stars to the naked eye, hundreds through glass."],
+  ["M44","Open cluster",8.670,19.667,3.7,"The Beehive Cluster — a hazy patch in Cancer's heart."],
+  ["M13","Globular cluster",16.695,36.460,5.8,"The Great Hercules Cluster, a few hundred thousand stars in one knot."],
+  ["M22","Globular cluster",18.607,-23.904,5.1,"One of the nearest globulars, low in Sagittarius."],
+  ["M4","Globular cluster",16.393,-26.526,5.6,"A loose globular sitting right beside Antares."],
+  ["M3","Globular cluster",13.703,28.377,6.2,"A dense globular between Bootes and Canes Venatici."],
+  ["M15","Globular cluster",21.500,12.167,6.2,"A tight globular off Pegasus' nose."],
+  ["M8","Nebula",18.062,-24.380,6.0,"The Lagoon Nebula, a bright cloud in the Milky Way's core direction."],
+  ["M7","Open cluster",17.897,-34.793,3.3,"Ptolemy's Cluster, catalogued in 130 AD."],
+  ["M6","Open cluster",17.668,-32.216,4.2,"The Butterfly Cluster, near the Scorpion's sting."],
+  ["M11","Open cluster",18.851,-6.270,5.8,"The Wild Duck Cluster, a dense wedge of stars."],
+  ["M35","Open cluster",6.148,24.340,5.3,"A moonlit-sized cluster at Gemini's feet."],
+  ["M41","Open cluster",6.767,-20.750,4.5,"A bright cluster four degrees below Sirius."],
+  ["M57","Planetary nebula",18.893,33.029,8.8,"The Ring Nebula, a dying star's exhaled shell."],
+  ["M27","Planetary nebula",19.994,22.721,7.4,"The Dumbbell Nebula in Vulpecula."],
+  ["M51","Galaxy",13.498,47.195,8.4,"The Whirlpool — the first galaxy recognised as a spiral."],
+  ["M81","Galaxy",9.926,69.066,6.9,"Bode's Galaxy, high in Ursa Major."],
+  ["M104","Galaxy",12.667,-11.623,8.0,"The Sombrero Galaxy, cut by a dust lane."],
+  ["NGC 869","Open cluster",2.320,57.140,4.3,"Half of the Double Cluster in Perseus."],
+  ["Mel 111","Open cluster",12.370,26.100,1.8,"The Coma Star Cluster, a wide naked-eye scatter."],
+  ["LMC","Galaxy",5.393,-69.756,0.9,"Large Magellanic Cloud — a satellite galaxy, southern skies only."],
+  ["SMC","Galaxy",0.877,-72.829,2.7,"Small Magellanic Cloud, companion to the LMC."],
+  ["NGC 5139","Globular cluster",13.446,-47.480,3.9,"Omega Centauri, the largest globular in the galaxy."],
+  ["NGC 104","Globular cluster",0.401,-72.081,4.1,"47 Tucanae, second only to Omega Centauri."],
+  ["NGC 4755","Open cluster",12.895,-60.350,4.2,"The Jewel Box, beside the Southern Cross."],
+  ["IC 2602","Open cluster",10.720,-64.400,1.9,"The Southern Pleiades in Carina."]
+];
+
+/* ============================================================
+   Astronomy
+   ============================================================ */
+const D2R = Math.PI / 180, R2D = 180 / Math.PI, TAU = Math.PI * 2;
+const sin = a => Math.sin(a * D2R), cos = a => Math.cos(a * D2R), tan = a => Math.tan(a * D2R);
+const rev = a => ((a % 360) + 360) % 360;
+
+function julian(ms) { return ms / 86400000 + 2440587.5; }
+
+function gmst(jd) {
+  const d = jd - 2451545.0, T = d / 36525;
+  return rev(280.46061837 + 360.98564736629 * d + 0.000387933 * T * T - T * T * T / 38710000);
+}
+
+/* equatorial (RA hours, Dec deg) -> horizontal (alt deg, az deg from N through E) */
+function horizontal(raH, decD, lstDeg, latD) {
+  const H = rev(lstDeg - raH * 15);
+  const sd = sin(decD), cd = cos(decD), sp = sin(latD), cp = cos(latD), cH = cos(H), sH = sin(H);
+  const alt = Math.asin(sd * sp + cd * cp * cH) * R2D;
+  const az = rev(Math.atan2(-cd * sH, sd * cp - cd * sp * cH) * R2D);
+  return [alt, az];
+}
+
+/* ecliptic (lon, lat, deg) -> equatorial [RA hours, Dec deg] */
+function eclToEq(lon, lat, obl) {
+  const x = cos(lat) * cos(lon);
+  const y = cos(lat) * sin(lon) * cos(obl) - sin(lat) * sin(obl);
+  const z = cos(lat) * sin(lon) * sin(obl) + sin(lat) * cos(obl);
+  return [rev(Math.atan2(y, x) * R2D) / 15, Math.atan2(z, Math.hypot(x, y)) * R2D];
+}
+
+/* Schlyter low-precision ephemeris. d = days since 2000 Jan 0.0 TDT */
+function dayNumber(jd) { return jd - 2451543.5; }
+
+function eccAnomaly(M, e) {
+  const eD = e * R2D;
+  let E = M + eD * sin(M) * (1 + e * cos(M));
+  for (let i = 0; i < 6; i++) {
+    const dE = (E - eD * sin(E) - M) / (1 - e * cos(E));
+    E -= dE;
+    if (Math.abs(dE) < 1e-6) break;
+  }
+  return E;
+}
+
+/* Schlyter's mean Sun, referred to the equinox of date. Used only to drive the
+   lunar perturbation terms and the Moon's elongation, which live in that frame. */
+function sunOfDate(d) {
+  const w = 282.9404 + 4.70935e-5 * d;
+  const e = 0.016709 - 1.151e-9 * d;
+  const M = rev(356.0470 + 0.9856002585 * d);
+  const E = M + e * R2D * sin(M) * (1 + e * cos(M));
+  const xv = cos(E) - e, yv = Math.sqrt(1 - e * e) * sin(E);
+  const r = Math.hypot(xv, yv);
+  const lon = rev(Math.atan2(yv, xv) * R2D + w);
+  return { lon, r, M, w };
+}
+
+/* JPL "Keplerian Elements for Approximate Positions of the Major Planets",
+   1800-2050 set: [a, e, i, L, longitude of perihelion, longitude of node] and
+   per-century rates, referred to the J2000 ecliptic — the same frame as the
+   star catalogue above, so planets land among the right stars. */
+const JPL = {
+  Mercury: [[0.38709927, 0.20563593, 7.00497902, 252.25032350, 77.45779628, 48.33076593],
+            [0.00000037, 0.00001906, -0.00594749, 149472.67411175, 0.16047689, -0.12534081]],
+  Venus:   [[0.72333566, 0.00677672, 3.39467605, 181.97909950, 131.60246718, 76.67984255],
+            [0.00000390, -0.00004107, -0.00078890, 58517.81538729, 0.00268329, -0.27769418]],
+  Earth:   [[1.00000261, 0.01671123, -0.00001531, 100.46457166, 102.93768193, 0.0],
+            [0.00000562, -0.00004392, -0.01294668, 35999.37244981, 0.32327364, 0.0]],
+  Mars:    [[1.52371034, 0.09339410, 1.84969142, -4.55343205, -23.94362959, 49.55953891],
+            [0.00001847, 0.00007882, -0.00813131, 19140.30268499, 0.44441088, -0.29257343]],
+  Jupiter: [[5.20288700, 0.04838624, 1.30439695, 34.39644051, 14.72847983, 100.47390909],
+            [-0.00011607, -0.00013253, -0.00183714, 3034.74612775, 0.21252668, 0.20469106]],
+  Saturn:  [[9.53667594, 0.05386179, 2.48599187, 49.95424423, 92.59887831, 113.66242448],
+            [-0.00125060, -0.00050991, 0.00193609, 1222.49362201, -0.41897216, -0.28867794]],
+  Uranus:  [[19.18916464, 0.04725744, 0.77263783, 313.23810451, 170.95427630, 74.01692503],
+            [-0.00196176, -0.00004397, -0.00242939, 428.48202785, 0.40805281, 0.04240589]],
+  Neptune: [[30.06992276, 0.00859048, 1.77004347, -55.12002969, 44.96476227, 131.78422574],
+            [0.00026291, 0.00005105, 0.00035372, 218.45945325, -0.32241464, -0.00508664]]
+};
+
+const PLANET_NAMES = ["Mercury", "Venus", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"];
+const OBL_J2000 = 23.4392911;
+
+/* heliocentric rectangular coordinates, J2000 ecliptic, AU */
+function helio(name, jd) {
+  const T = (jd - 2451545.0) / 36525, el = JPL[name];
+  const a = el[0][0] + el[1][0] * T, e = el[0][1] + el[1][1] * T;
+  const i = el[0][2] + el[1][2] * T, L = el[0][3] + el[1][3] * T;
+  const peri = el[0][4] + el[1][4] * T, node = el[0][5] + el[1][5] * T;
+  const w = peri - node;
+  const M = ((L - peri) % 360 + 540) % 360 - 180;
+  let E = M + R2D * e * sin(M);
+  for (let k = 0; k < 10; k++) {
+    const dE = (M - (E - R2D * e * sin(E))) / (1 - e * cos(E));
+    E += dE;
+    if (Math.abs(dE) < 1e-9) break;
+  }
+  const xp = a * (cos(E) - e), yp = a * Math.sqrt(1 - e * e) * sin(E);
+  const cw = cos(w), sw = sin(w), cn = cos(node), sn = sin(node), ci = cos(i), si = sin(i);
+  return [
+    (cw * cn - sw * sn * ci) * xp + (-sw * cn - cw * sn * ci) * yp,
+    (cw * sn + sw * cn * ci) * xp + (-sw * sn + cw * cn * ci) * yp,
+    (sw * si) * xp + (cw * si) * yp
+  ];
+}
+
+const PLANET_LOOK = {
+  Mercury: ["#c8c2b6", -0.36, "Never far from the Sun — catch it in twilight or not at all."],
+  Venus:   ["#f5e6c0", -4.34, "The brightest point of light in the sky, wrapped in reflective cloud."],
+  Mars:    ["#e08560", -1.51, "Its colour is literal rust — iron oxide dust over the whole surface."],
+  Jupiter: ["#e8d9b8", -9.25, "Four moons swing around it, visible in steady binoculars."],
+  Saturn:  ["#e6d29a", -8.88, "Rings need about 25x magnification before they resolve."],
+  Uranus:  ["#a8dbdb", -7.15, "Just at the naked-eye limit under a dark sky, if you know exactly where to look."],
+  Neptune: ["#7f9de0", -6.90, "Never visible without optics — found by mathematics before it was seen."]
+};
+
+/* geocentric Sun, J2000 ecliptic — simply the reverse of Earth's orbit */
+function sunPos(jd) {
+  const e = helio("Earth", jd);
+  const x = -e[0], y = -e[1], z = -e[2];
+  return { lon: rev(Math.atan2(y, x) * R2D), lat: Math.atan2(z, Math.hypot(x, y)) * R2D,
+           r: Math.hypot(x, y, z) };
+}
+
+function planetPos(name, jd) {
+  const p = helio(name, jd), e = helio("Earth", jd);
+  const xg = p[0] - e[0], yg = p[1] - e[1], zg = p[2] - e[2];
+  const dist = Math.hypot(xg, yg, zg);
+  const r = Math.hypot(p[0], p[1], p[2]);
+  const R = Math.hypot(e[0], e[1], e[2]);
+  const glon = rev(Math.atan2(yg, xg) * R2D);
+  const glat = Math.atan2(zg, Math.hypot(xg, yg)) * R2D;
+
+  /* phase angle and magnitude */
+  let cosFV = (r * r + dist * dist - R * R) / (2 * r * dist);
+  cosFV = Math.max(-1, Math.min(1, cosFV));
+  const FV = Math.acos(cosFV) * R2D;
+  const base = PLANET_LOOK[name][1];
+  let mag = base + 5 * Math.log10(r * dist);
+  if (name === "Mercury") mag += 0.027 * FV + 2.2e-13 * Math.pow(FV, 6);
+  else if (name === "Venus") mag += 0.013 * FV + 4.2e-7 * Math.pow(FV, 3);
+  else if (name === "Mars") mag += 0.016 * FV;
+  else if (name === "Jupiter") mag += 0.014 * FV;
+  else mag += 0.001 * FV;
+
+  return { lon: glon, lat: glat, dist, mag, phase: (1 + cosFV) / 2 };
+}
+
+function moonPos(d, sun) {
+  const N = rev(125.1228 - 0.0529538083 * d), i = 5.1454;
+  const w = rev(318.0634 + 0.1643573223 * d), a = 60.2666, e = 0.054900;
+  const M = rev(115.3654 + 13.0649929509 * d);
+  const E = eccAnomaly(M, e);
+  const xv = a * (cos(E) - e), yv = a * Math.sqrt(1 - e * e) * sin(E);
+  const r0 = Math.hypot(xv, yv), v = rev(Math.atan2(yv, xv) * R2D);
+  const u = v + w;
+  const xe = r0 * (cos(N) * cos(u) - sin(N) * sin(u) * cos(i));
+  const ye = r0 * (sin(N) * cos(u) + cos(N) * sin(u) * cos(i));
+  const ze = r0 * sin(u) * sin(i);
+
+  let lon = rev(Math.atan2(ye, xe) * R2D);
+  let lat = Math.atan2(ze, Math.hypot(xe, ye)) * R2D;
+  let r = Math.sqrt(xe * xe + ye * ye + ze * ze);
+
+  const Ls = rev(sun.M + sun.w), Lm = rev(N + w + M);
+  const D = rev(Lm - Ls), F = rev(Lm - N), Ms = sun.M, Mm = M;
+
+  lon += -1.274 * sin(Mm - 2 * D) + 0.658 * sin(2 * D) - 0.186 * sin(Ms)
+       - 0.059 * sin(2 * Mm - 2 * D) - 0.057 * sin(Mm - 2 * D + Ms) + 0.053 * sin(Mm + 2 * D)
+       + 0.046 * sin(2 * D - Ms) + 0.041 * sin(Mm - Ms) - 0.035 * sin(D)
+       - 0.031 * sin(Mm + Ms) - 0.015 * sin(2 * F - 2 * D) + 0.011 * sin(Mm - 4 * D);
+  lat += -0.173 * sin(F - 2 * D) - 0.055 * sin(Mm - F - 2 * D) - 0.046 * sin(Mm + F - 2 * D)
+       + 0.033 * sin(F + 2 * D) + 0.017 * sin(2 * Mm + F);
+  r += -0.58 * cos(Mm - 2 * D) - 0.46 * cos(2 * D);
+
+  /* elongation and phase are frame-independent, so take them before precessing */
+  const elong = Math.acos(Math.max(-1, Math.min(1, cos(lat) * cos(lon - sun.lon)))) * R2D;
+  const illum = (1 + cos(180 - elong)) / 2;
+  const waxing = rev(lon - sun.lon) < 180;
+
+  /* Schlyter's lunar theory is referred to the equinox of date; shift it back to
+     J2000 by the general precession in longitude so it agrees with the stars */
+  const T = (d - 1.5) / 36525;
+  lon -= 1.396888 * T + 0.0003086 * T * T;
+
+  return { lon: rev(lon), lat, dist: r, illum, elong, waxing };
+}
+
+/* galactic -> equatorial basis (J2000) */
+const GAL = (() => {
+  const v = (raH, dec) => [cos(dec) * cos(raH * 15), cos(dec) * sin(raH * 15), sin(dec)];
+  const P = v(12.85632, 27.12825);          // north galactic pole
+  const C = v(17.76033, -28.93617);         // galactic centre, l=0 b=0
+  const Y = [P[1] * C[2] - P[2] * C[1], P[2] * C[0] - P[0] * C[2], P[0] * C[1] - P[1] * C[0]];
+  return { P, C, Y };
+})();
+
+function galToEq(l, b) {
+  const cb = cos(b), sb = sin(b), cl = cos(l), sl = sin(l);
+  const x = cb * cl * GAL.C[0] + cb * sl * GAL.Y[0] + sb * GAL.P[0];
+  const y = cb * cl * GAL.C[1] + cb * sl * GAL.Y[1] + sb * GAL.P[1];
+  const z = cb * cl * GAL.C[2] + cb * sl * GAL.Y[2] + sb * GAL.P[2];
+  return [rev(Math.atan2(y, x) * R2D) / 15, Math.atan2(z, Math.hypot(x, y)) * R2D];
+}
+
+/* ============================================================
+   Colour
+   ============================================================ */
+const BV_STOPS = [
+  [-0.35, [150, 175, 255]], [0.00, [200, 214, 255]], [0.30, [248, 247, 255]],
+  [0.60, [255, 244, 232]], [1.00, [255, 212, 165]], [1.50, [255, 182, 133]],
+  [2.00, [255, 152, 112]]
+];
+
+function bvColor(bv) {
+  let a = BV_STOPS[0], b = BV_STOPS[BV_STOPS.length - 1];
+  for (let i = 0; i < BV_STOPS.length - 1; i++) {
+    if (bv >= BV_STOPS[i][0] && bv <= BV_STOPS[i + 1][0]) { a = BV_STOPS[i]; b = BV_STOPS[i + 1]; break; }
+  }
+  if (bv < BV_STOPS[0][0]) return BV_STOPS[0][1];
+  if (bv > BV_STOPS[BV_STOPS.length - 1][0]) return BV_STOPS[BV_STOPS.length - 1][1];
+  const t = (bv - a[0]) / (b[0] - a[0] || 1);
+  return [0, 1, 2].map(i => Math.round(a[1][i] + (b[1][i] - a[1][i]) * t));
+}
+
+/* ============================================================
+   State
+   ============================================================ */
+const PRESETS = [
+  ["Istanbul", 41.008, 28.978], ["Ankara", 39.933, 32.859], ["London", 51.507, -0.128],
+  ["Paris", 48.857, 2.352], ["Berlin", 52.520, 13.405], ["Cairo", 30.044, 31.236],
+  ["Dubai", 25.205, 55.271], ["Delhi", 28.614, 77.209], ["Tokyo", 35.690, 139.692],
+  ["Sydney", -33.868, 151.209], ["Nairobi", -1.292, 36.822], ["Sao Paulo", -23.551, -46.633],
+  ["New York", 40.713, -74.006], ["Los Angeles", 34.052, -118.244], ["Reykjavik", 64.147, -21.942],
+  ["Santiago", -33.449, -70.669], ["Cape Town", -33.925, 18.424]
+];
+
+const S = {
+  lat: 41.008, lon: 28.978, place: "Istanbul",
+  time: Date.now(), rate: 1, playing: true,
+  mode: "dome",              // dome | scope
+  spin: 0,                   // dome rotation, deg
+  center: { alt: 45, az: 180 },
+  fov: 60,
+  tilt: false,
+  limmag: 5.6,
+  layers: { lines: true, names: true, milkyway: true, planets: true, deep: true, grid: false, ecliptic: false, realsky: false },
+  selected: null,
+  hover: null,
+  intro: 0
+};
+
+try {
+  const saved = JSON.parse(localStorage.getItem("overhead") || "null");
+  if (saved && typeof saved.lat === "number") {
+    S.lat = saved.lat; S.lon = saved.lon; S.place = saved.place || "Custom";
+    if (saved.layers) Object.assign(S.layers, saved.layers);
+    if (typeof saved.limmag === "number") S.limmag = saved.limmag;
+  }
+} catch (e) { /* first visit */ }
+
+function persist() {
+  try {
+    localStorage.setItem("overhead", JSON.stringify({
+      lat: S.lat, lon: S.lon, place: S.place, layers: S.layers, limmag: S.limmag
+    }));
+  } catch (e) { /* storage blocked — session only */ }
+}
+
+/* ============================================================
+   Scene computation
+   ============================================================ */
+const starIndex = {};
+STARS.forEach(s => { starIndex[s[0]] = s; });
+
+let scene = null;
+
+function buildScene() {
+  const jd = julian(S.time), lst = rev(gmst(jd) + S.lon), d = dayNumber(jd);
+  const obl = OBL_J2000;
+  const sun = sunPos(jd);
+
+  const sunEq = eclToEq(sun.lon, sun.lat, obl);
+  const sunH = horizontal(sunEq[0], sunEq[1], lst, S.lat);
+
+  const objects = [];
+
+  for (const s of STARS) {
+    const [alt, az] = horizontal(s[2], s[3], lst, S.lat);
+    objects.push({ t: "star", key: s[0], name: s[1], ra: s[2], dec: s[3], mag: s[4], bv: s[5], alt, az });
+  }
+
+  const bodies = [];
+  bodies.push({ t: "sun", name: "Sun", ra: sunEq[0], dec: sunEq[1], mag: -26.7, alt: sunH[0], az: sunH[1],
+                note: "Our star, 8 light-minutes away. Never look at it through optics." });
+
+  const mp = moonPos(d, sunOfDate(d));
+  const moonEq = eclToEq(mp.lon, mp.lat, obl);
+  const moonH = horizontal(moonEq[0], moonEq[1], lst, S.lat);
+  const pa = 180 - mp.elong;               // phase angle, degrees
+  const moonMag = -12.73 + 0.026 * Math.abs(pa) + 4e-9 * Math.pow(Math.abs(pa), 4);
+  bodies.push({ t: "moon", name: "Moon", ra: moonEq[0], dec: moonEq[1], mag: moonMag,
+                alt: moonH[0], az: moonH[1], illum: mp.illum, waxing: mp.waxing, distER: mp.dist,
+                note: moonPhaseName(mp) + " — " + Math.round(mp.illum * 100) + "% lit, " +
+                      Math.round(mp.dist * 6371).toLocaleString() + " km away." });
+
+  for (const name of PLANET_NAMES) {
+    const p = planetPos(name, jd);
+    const eq = eclToEq(p.lon, p.lat, obl);
+    const h = horizontal(eq[0], eq[1], lst, S.lat);
+    bodies.push({ t: "planet", name, ra: eq[0], dec: eq[1], mag: p.mag, alt: h[0], az: h[1],
+                  dist: p.dist, note: PLANET_LOOK[name][2], color: PLANET_LOOK[name][0] });
+  }
+
+  const deep = DEEP.map(o => {
+    const h = horizontal(o[2], o[3], lst, S.lat);
+    return { t: "deep", name: o[0], kind: o[1], ra: o[2], dec: o[3], mag: o[4], note: o[5], alt: h[0], az: h[1] };
+  });
+
+  scene = { jd, lst, d, obl, sun, sunAlt: sunH[0], objects, bodies, deep };
+  return scene;
+}
+
+function moonPhaseName(mp) {
+  const i = mp.illum;
+  if (i < 0.04) return "New Moon";
+  if (i > 0.96) return "Full Moon";
+  if (Math.abs(i - 0.5) < 0.06) return mp.waxing ? "First Quarter" : "Last Quarter";
+  if (mp.waxing) return i < 0.5 ? "Waxing Crescent" : "Waxing Gibbous";
+  return i < 0.5 ? "Waning Crescent" : "Waning Gibbous";
+}
+
+/* darkness: 0 = full daylight, 1 = astronomical night */
+function darkness(sunAlt) {
+  if (sunAlt >= 0) return 0;
+  if (sunAlt <= -18) return 1;
+  const t = -sunAlt / 18;
+  return t * t * (3 - 2 * t) * 0.999;
+}
+
+function phaseLabel(sunAlt) {
+  if (sunAlt > 0) return ["Daylight — Sun " + sunAlt.toFixed(0) + "° up", "#8fbde8"];
+  if (sunAlt > -6) return ["Civil twilight", "#c98f5a"];
+  if (sunAlt > -12) return ["Nautical twilight", "#7b7fb8"];
+  if (sunAlt > -18) return ["Astronomical twilight", "#4a5688"];
+  return ["Night — Sun " + Math.abs(sunAlt).toFixed(0) + "° below", "#6fa8cf"];
+}
+
+/* ============================================================
+   Projection
+   ============================================================ */
+const cv = document.getElementById("sky");
+const ctx = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+
+/* Measure defensively: a host page can lay this out before the canvas has a box,
+   and a zero-width canvas yields a negative dome radius, which canvas rejects. */
+function measure() {
+  const r = cv.getBoundingClientRect();
+  let w = Math.round(r.width) || cv.clientWidth || 0;
+  let h = Math.round(r.height) || cv.clientHeight || 0;
+  const root = document.documentElement || {};
+  if (w < 2) w = window.innerWidth || root.clientWidth || 800;
+  if (h < 2) h = window.innerHeight || root.clientHeight || 600;
+  return [w, h];
+}
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const [w, h] = measure();
+  if (w === W && h === H && cv.width) return;
+  W = w; H = h;
+  cv.width = Math.max(1, Math.round(W * DPR));
+  cv.height = Math.max(1, Math.round(H * DPR));
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+
+function view() {
+  const span = Math.max(4, Math.min(W, H));
+  if (S.mode === "dome") {
+    return { mode: "dome", cx: W / 2, cy: H / 2, R: Math.max(2, span / 2 - 30), spin: S.spin };
+  }
+  const scale = (span / 2) / Math.tan(S.fov / 2 * D2R);
+  const F = unit(S.center.alt, S.center.az);
+  let Rv = [F[1], -F[0], 0];
+  const rl = Math.hypot(Rv[0], Rv[1]);
+  if (rl < 1e-6) Rv = [1, 0, 0]; else Rv = [Rv[0] / rl, Rv[1] / rl, 0];
+  const U = [Rv[1] * F[2] - Rv[2] * F[1], Rv[2] * F[0] - Rv[0] * F[2], Rv[0] * F[1] - Rv[1] * F[0]];
+  return { mode: "scope", cx: W / 2, cy: H / 2, scale, F, Rv, U };
+}
+
+function unit(alt, az) {
+  return [cos(alt) * sin(az), cos(alt) * cos(az), sin(alt)];
+}
+
+/* returns [x, y, visible, scaleFactor] */
+function project(alt, az, v) {
+  if (v.mode === "dome") {
+    if (alt < -1.5) return null;
+    const z = 90 - alt;
+    const r = v.R * Math.tan(z / 2 * D2R);
+    const a = (az + v.spin) * D2R;
+    return [v.cx - r * Math.sin(a), v.cy - r * Math.cos(a), 1];
+  }
+  const p = unit(alt, az);
+  const dp = p[0] * v.F[0] + p[1] * v.F[1] + p[2] * v.F[2];
+  if (dp <= 0.05) return null;
+  const sx = (p[0] * v.Rv[0] + p[1] * v.Rv[1] + p[2] * v.Rv[2]) / dp;
+  const sy = (p[0] * v.U[0] + p[1] * v.U[1] + p[2] * v.U[2]) / dp;
+  const x = v.cx + sx * v.scale, y = v.cy - sy * v.scale;
+  if (x < -200 || x > W + 200 || y < -200 || y > H + 200) return null;
+  return [x, y, 1];
+}
+
+/* inverse: screen -> alt/az */
+function unproject(x, y, v) {
+  if (v.mode === "dome") {
+    const dx = x - v.cx, dy = y - v.cy;
+    const r = Math.hypot(dx, dy);
+    if (r > v.R) return null;
+    const z = 2 * Math.atan(r / v.R) * R2D;
+    const alt = 90 - z;
+    const a = Math.atan2(-dx, -dy) * R2D;
+    return { alt, az: rev(a - v.spin) };
+  }
+  const sx = (x - v.cx) / v.scale, sy = (v.cy - y) / v.scale;
+  const d = [
+    v.F[0] + sx * v.Rv[0] + sy * v.U[0],
+    v.F[1] + sx * v.Rv[1] + sy * v.U[1],
+    v.F[2] + sx * v.Rv[2] + sy * v.U[2]
+  ];
+  const n = Math.hypot(d[0], d[1], d[2]);
+  return { alt: Math.asin(d[2] / n) * R2D, az: rev(Math.atan2(d[0], d[1]) * R2D) };
+}
+
+/* angular size of one degree at a given point, in px — used to size the Moon and glyphs */
+function pxPerDeg(v) {
+  return v.mode === "dome" ? v.R / 90 : v.scale * D2R;
+}
+
+/* ============================================================
+   Drawing
+   ============================================================ */
+function sprite(rgb, inner) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d");
+  const rg = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  rg.addColorStop(0, "rgba(" + rgb + ",1)");
+  rg.addColorStop(0.35, "rgba(" + rgb + "," + inner + ")");
+  rg.addColorStop(1, "rgba(" + rgb + ",0)");
+  g.fillStyle = rg;
+  g.fillRect(0, 0, 64, 64);
+  return c;
+}
+
+const glow = sprite("255,255,255", 0.34);
+const haze = sprite("178,196,238", 0.5);   // Milky Way
+
+/* font stacks resolved once — reading them per frame forces layout */
+const FONT = {
+  sans: getComputedStyle(document.body).fontFamily,
+  serif: getComputedStyle(document.querySelector("h1")).fontFamily
+};
+
+let hitList = [];
+
+/* Only register a click target where the object is actually visible: the dome
+   draws a little past the horizon, but those pixels are clipped away. */
+function pushHit(v, x, y, r, obj) {
+  if (!isFinite(x) || !isFinite(y)) return;
+  if (v.mode === "dome" && Math.hypot(x - v.cx, y - v.cy) > v.R) return;
+  if (x < -r || y < -r || x > W + r || y > H + r) return;
+  hitList.push({ x, y, r, obj });
+}
+
+function draw() {
+  const v = view();
+  const dark = S.layers.realsky ? darkness(scene.sunAlt) : 1;
+  const starVis = S.layers.realsky ? Math.pow(dark, 1.6) : 1;
+  const limit = S.limmag - (1 - starVis) * 5;
+
+  hitList = [];
+  paintGround(v, dark);
+
+  /* everything celestial lives inside the dome disc */
+  ctx.save();
+  if (v.mode === "dome") {
+    ctx.beginPath();
+    ctx.arc(v.cx, v.cy, v.R, 0, TAU);
+    ctx.clip();
+  }
+  if (S.layers.milkyway && starVis > 0.15) drawMilkyWay(v, starVis);
+  if (S.layers.grid) drawGrid(v);
+  if (S.layers.ecliptic) drawEcliptic(v);
+  if (S.layers.lines) drawFigures(v, starVis);
+  drawStars(v, limit, starVis);
+  if (S.layers.deep) drawDeep(v, limit + 3.4, starVis);
+  if (S.layers.planets) drawBodies(v, dark);
+  if (S.layers.names) drawLabels(v, starVis);
+  ctx.restore();
+
+  drawHorizon(v);
+  drawSelection(v);
+}
+
+function paintGround(v, dark) {
+  /* sky wash keyed to the Sun's real altitude */
+  const sa = scene.sunAlt;
+  let top, bot;
+  if (!S.layers.realsky || sa <= -18) { top = "#04060c"; bot = "#0a0f1c"; }
+  else if (sa > 0) { top = "#2f6ba8", bot = "#8fb8d8"; }
+  else if (sa > -6) { top = "#12233f", bot = "#8a5f47"; }
+  else if (sa > -12) { top = "#080e1e", bot = "#2c3358"; }
+  else { top = "#05070f", bot = "#111634"; }
+
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, top);
+  g.addColorStop(1, bot);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  if (v.mode === "dome") {
+    /* mask everything outside the dome as ground */
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.arc(v.cx, v.cy, v.R, 0, TAU, true);
+    ctx.fillStyle = "#05070d";
+    ctx.fill("evenodd");
+    ctx.restore();
+  }
+}
+
+function drawMilkyWay(v, vis) {
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const ppd = pxPerDeg(v);
+  for (let l = 0; l < 360; l += 3) {
+    /* the core third of the galaxy is far brighter than the anticentre */
+    const dl = Math.min(Math.abs(l), 360 - Math.abs(l));
+    const coreBoost = 1 + 1.5 * Math.exp(-(dl * dl) / 1800);
+    for (let bi = -2; bi <= 2; bi++) {
+      const b = bi * 7.5;
+      const eq = galToEq(l, b);
+      const h = horizontal(eq[0], eq[1], scene.lst, S.lat);
+      if (h[0] < -2) continue;
+      const p = project(h[0], h[1], v);
+      if (!p) continue;
+      const fade = Math.exp(-(b * b) / 190);
+      const alpha = 0.05 * fade * coreBoost * vis * Math.min(1, (h[0] + 4) / 12);
+      if (alpha <= 0.003) continue;
+      const rad = ppd * 11;
+      ctx.globalAlpha = Math.min(0.2, alpha);
+      ctx.drawImage(haze, p[0] - rad, p[1] - rad, rad * 2, rad * 2);
+    }
+  }
+  ctx.restore();
+}
+
+function polyline(v, pts) {
+  /* trace a sampled curve, lifting the pen where it leaves the view or jumps */
+  const maxJump = Math.max(W, H) * 0.6;
+  ctx.beginPath();
+  let prev = null;
+  for (let i = 0; i < pts.length; i++) {
+    const p = project(pts[i][0], pts[i][1], v);
+    if (!p) { prev = null; continue; }
+    if (!prev || Math.hypot(p[0] - prev[0], p[1] - prev[1]) > maxJump) ctx.moveTo(p[0], p[1]);
+    else ctx.lineTo(p[0], p[1]);
+    prev = p;
+  }
+  ctx.stroke();
+}
+
+function drawGrid(v) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(111,168,207,0.16)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 4]);
+  for (let alt = 0; alt <= 80; alt += 20) {
+    const pts = [];
+    for (let az = 0; az <= 360; az += 3) pts.push([alt, az]);
+    polyline(v, pts);
+  }
+  ctx.setLineDash([]);
+  for (let az = 0; az < 360; az += 30) {
+    const pts = [];
+    for (let alt = 0; alt <= 89; alt += 3) pts.push([alt, az]);
+    ctx.strokeStyle = az % 90 === 0 ? "rgba(111,168,207,0.24)" : "rgba(111,168,207,0.10)";
+    polyline(v, pts);
+  }
+  ctx.restore();
+}
+
+function drawEcliptic(v) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(217,164,65,0.42)";
+  ctx.lineWidth = 1.1;
+  ctx.setLineDash([6, 5]);
+  const pts = [];
+  for (let lon = 0; lon <= 360; lon += 2) {
+    const eq = eclToEq(lon, 0, scene.obl);
+    pts.push(horizontal(eq[0], eq[1], scene.lst, S.lat));
+  }
+  polyline(v, pts);
+  ctx.restore();
+}
+
+function drawFigures(v, vis) {
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(140,170,225," + (0.30 * vis * S.intro).toFixed(3) + ")";
+  ctx.lineCap = "round";
+  for (const [, paths] of FIGURES) {
+    for (const path of paths) {
+      ctx.beginPath();
+      let pen = false;
+      for (const key of path) {
+        const s = starIndex[key];
+        if (!s) { pen = false; continue; }
+        const h = horizontal(s[2], s[3], scene.lst, S.lat);
+        const p = project(h[0], h[1], v);
+        if (!p) { pen = false; continue; }
+        if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; } else ctx.lineTo(p[0], p[1]);
+      }
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function starRadius(mag, limit, zoom) {
+  const r = 0.72 + Math.max(0, limit - mag) * 0.46;
+  return Math.min(9, r) * zoom;
+}
+
+function drawStars(v, limit, vis) {
+  const zoom = v.mode === "scope" ? Math.min(2.2, Math.max(0.8, 55 / S.fov)) : 1;
+  ctx.save();
+  for (const o of scene.objects) {
+    if (o.mag > limit + 0.4) continue;
+    if (o.alt < -0.6) continue;
+    const p = project(o.alt, o.az, v);
+    if (!p) continue;
+
+    const introGate = Math.min(1, Math.max(0, S.intro * 3.2 - (o.mag + 1.6) / 4));
+    if (introGate <= 0) continue;
+
+    const fade = Math.min(1, (limit + 0.4 - o.mag) / 0.9) * vis * introGate;
+    if (fade <= 0.02) continue;
+
+    const c = bvColor(o.bv);
+    const r = starRadius(o.mag, limit, zoom);
+
+    if (r > 1.9) {
+      ctx.globalAlpha = 0.30 * fade;
+      const gr = r * 4.2;
+      ctx.drawImage(glow, p[0] - gr, p[1] - gr, gr * 2, gr * 2);
+    }
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], r, 0, TAU);
+    ctx.fill();
+
+    pushHit(v, p[0], p[1], Math.max(9, r + 6), o);
+  }
+  ctx.restore();
+}
+
+function drawDeep(v, limit, vis) {
+  ctx.save();
+  ctx.lineWidth = 1.1;
+  for (const o of scene.deep) {
+    if (o.alt < 0) continue;
+    if (o.mag > limit) continue;
+    const p = project(o.alt, o.az, v);
+    if (!p) continue;
+    const a = 0.62 * vis * S.intro;
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = "rgba(160,205,235,0.9)";
+    const r = 4.5;
+    ctx.beginPath();
+    if (o.kind === "Galaxy") {
+      ctx.ellipse(p[0], p[1], r * 1.5, r * 0.72, -0.5, 0, TAU);
+    } else if (o.kind.indexOf("Globular") === 0) {
+      ctx.arc(p[0], p[1], r, 0, TAU);
+      ctx.moveTo(p[0] - r, p[1]); ctx.lineTo(p[0] + r, p[1]);
+      ctx.moveTo(p[0], p[1] - r); ctx.lineTo(p[0], p[1] + r);
+    } else if (o.kind === "Nebula" || o.kind === "Planetary nebula") {
+      ctx.rect(p[0] - r, p[1] - r, r * 2, r * 2);
+    } else {
+      ctx.setLineDash([2.5, 2.5]);
+      ctx.arc(p[0], p[1], r, 0, TAU);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    pushHit(v, p[0], p[1], 12, o);
+  }
+  ctx.restore();
+}
+
+function drawBodies(v, dark) {
+  const ppd = pxPerDeg(v);
+  ctx.save();
+  for (const b of scene.bodies) {
+    if (b.alt < -1) continue;
+    const p = project(b.alt, b.az, v);
+    if (!p) continue;
+
+    if (b.t === "sun") {
+      const r = Math.max(6, ppd * 0.27);
+      ctx.globalAlpha = 0.85;
+      const gr = r * 9;
+      ctx.drawImage(glow, p[0] - gr, p[1] - gr, gr * 2, gr * 2);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#fff4d0";
+      ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, TAU); ctx.fill();
+      pushHit(v, p[0], p[1], r + 8, b);
+      continue;
+    }
+
+    if (b.t === "moon") {
+      const r = Math.max(7, ppd * 0.26);
+      ctx.globalAlpha = 0.5;
+      const gr = r * 3.4;
+      ctx.drawImage(glow, p[0] - gr, p[1] - gr, gr * 2, gr * 2);
+      ctx.globalAlpha = 1;
+      drawMoon(p[0], p[1], r, b.illum, b.waxing);
+      pushHit(v, p[0], p[1], r + 8, b);
+      continue;
+    }
+
+    const r = Math.max(1.8, 1.5 + Math.max(0, 4.2 - b.mag) * 0.62) * (v.mode === "scope" ? Math.min(2, 55 / S.fov) : 1);
+    ctx.globalAlpha = 0.42;
+    const gr = r * 5;
+    ctx.drawImage(glow, p[0] - gr, p[1] - gr, gr * 2, gr * 2);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = b.color;
+    ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, TAU); ctx.fill();
+
+    if (S.layers.names) {
+      ctx.globalAlpha = 0.9;
+      ctx.font = "600 11px " + FONT.sans;
+      ctx.fillStyle = "rgba(232,214,170,0.92)";
+      ctx.textAlign = "left";
+      ctx.fillText(b.name, p[0] + r + 6, p[1] + 4);
+    }
+    pushHit(v, p[0], p[1], Math.max(10, r + 7), b);
+  }
+  ctx.restore();
+}
+
+function drawMoon(x, y, r, illum, waxing) {
+  const k = 1 - 2 * illum;                 // terminator ellipse half-width factor
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(waxing ? 1 : -1, 1);           // lit limb on the right when waxing
+
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, TAU);
+  ctx.fillStyle = "#191d2b";
+  ctx.fill();
+
+  if (illum > 0.015) {
+    ctx.beginPath();
+    ctx.arc(0, 0, r, -Math.PI / 2, Math.PI / 2, false);
+    ctx.ellipse(0, 0, Math.abs(k) * r, r, 0, Math.PI / 2, -Math.PI / 2, k > 0);
+    ctx.closePath();
+    ctx.fillStyle = "#f2ecdc";
+    ctx.fill();
+  }
+  ctx.restore();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke();
+}
+
+function drawHorizon(v) {
+  const font = FONT.sans;
+  ctx.save();
+  if (v.mode === "dome") {
+    ctx.strokeStyle = "rgba(111,168,207,0.35)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(v.cx, v.cy, v.R, 0, TAU); ctx.stroke();
+
+    ctx.strokeStyle = "rgba(217,164,65,0.30)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(v.cx, v.cy, v.R + 7, 0, TAU); ctx.stroke();
+
+    /* zenith mark */
+    ctx.strokeStyle = "rgba(217,164,65,0.34)";
+    ctx.beginPath();
+    ctx.moveTo(v.cx - 6, v.cy); ctx.lineTo(v.cx + 6, v.cy);
+    ctx.moveTo(v.cx, v.cy - 6); ctx.lineTo(v.cx, v.cy + 6);
+    ctx.stroke();
+
+    const marks = [["N", 0], ["NE", 45], ["E", 90], ["SE", 135], ["S", 180], ["SW", 225], ["W", 270], ["NW", 315]];
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const [lbl, az] of marks) {
+      const a = (az + v.spin) * D2R;
+      const rr = v.R + 20;
+      const x = v.cx - rr * Math.sin(a), y = v.cy - rr * Math.cos(a);
+      const cardinal = lbl.length === 1;
+      ctx.fillStyle = cardinal ? "rgba(217,164,65,0.92)" : "rgba(141,149,175,0.7)";
+      ctx.font = (cardinal ? "600 13px " : "500 10px ") + font;
+      ctx.fillText(lbl, x, y);
+    }
+    ctx.restore();
+    return;
+  }
+
+  /* scope: horizon line + ground wash */
+  const pts = [];
+  for (let az = 0; az <= 360; az += 1.5) {
+    const p = project(0, az, v);
+    if (p) pts.push(p);
+  }
+  if (pts.length > 1) {
+    pts.sort((a, b) => a[0] - b[0]);
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (const p of pts) ctx.lineTo(p[0], p[1]);
+    ctx.lineTo(pts[pts.length - 1][0], H + 10);
+    ctx.lineTo(pts[0][0], H + 10);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, Math.min(...pts.map(p => p[1])), 0, H);
+    g.addColorStop(0, "rgba(5,7,13,0.75)");
+    g.addColorStop(1, "rgba(5,7,13,1)");
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (const p of pts) ctx.lineTo(p[0], p[1]);
+    ctx.strokeStyle = "rgba(111,168,207,0.45)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+  const marks = [["N", 0], ["NE", 45], ["E", 90], ["SE", 135], ["S", 180], ["SW", 225], ["W", 270], ["NW", 315]];
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const [lbl, az] of marks) {
+    const p = project(1.5, az, v);
+    if (!p) continue;
+    const cardinal = lbl.length === 1;
+    ctx.fillStyle = cardinal ? "rgba(217,164,65,0.92)" : "rgba(141,149,175,0.65)";
+    ctx.font = (cardinal ? "600 13px " : "500 10px ") + font;
+    ctx.fillText(lbl, p[0], p[1] - 12);
+  }
+  ctx.restore();
+}
+
+function drawLabels(v, vis) {
+  const font = FONT.sans;
+  const zoom = v.mode === "scope" ? 55 / S.fov : 1;
+  const nameLimit = v.mode === "scope" ? Math.min(4.2, 1.9 + Math.log2(zoom) * 1.6) : 2.15;
+  const placed = [];
+
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+
+  /* constellation names at figure centroids */
+  ctx.font = "italic 12px " + FONT.serif;
+  ctx.fillStyle = "rgba(141,160,200," + (0.42 * vis * S.intro).toFixed(3) + ")";
+  for (const [abbr, paths] of FIGURES) {
+    let sx = 0, sy = 0, n = 0, minAlt = 99;
+    for (const path of paths) {
+      for (const key of path) {
+        const s = starIndex[key];
+        if (!s) continue;
+        const h = horizontal(s[2], s[3], scene.lst, S.lat);
+        const p = project(h[0], h[1], v);
+        if (!p) continue;
+        sx += p[0]; sy += p[1]; n++;
+        minAlt = Math.min(minAlt, h[0]);
+      }
+    }
+    if (n < 3 || minAlt < 3) continue;
+    const x = sx / n, y = sy / n;
+    if (x < 40 || x > W - 40 || y < 30 || y > H - 30) continue;
+    ctx.textAlign = "center";
+    ctx.fillText((CONST_NAMES[abbr] || abbr).toUpperCase(), x, y);
+    placed.push([x, y, 60, 10]);
+  }
+
+  /* star proper names */
+  ctx.textAlign = "left";
+  ctx.font = "500 11px " + font;
+  for (const o of scene.objects) {
+    if (!o.name || o.mag > nameLimit || o.alt < 1) continue;
+    const p = project(o.alt, o.az, v);
+    if (!p) continue;
+    let clash = false;
+    for (const q of placed) {
+      if (Math.abs(p[0] - q[0]) < 52 && Math.abs(p[1] - q[1]) < 13) { clash = true; break; }
+    }
+    if (clash) continue;
+    placed.push([p[0] + 30, p[1], 60, 10]);
+    ctx.fillStyle = "rgba(216,226,248," + (0.78 * vis * S.intro).toFixed(3) + ")";
+    ctx.fillText(o.name, p[0] + 8, p[1] + 1);
+  }
+
+  /* deep sky designations */
+  if (S.layers.deep) {
+    ctx.font = "500 10px " + FONT.sans;
+    ctx.fillStyle = "rgba(160,205,235," + (0.6 * vis * S.intro).toFixed(3) + ")";
+    for (const o of scene.deep) {
+      if (o.alt < 2 || o.mag > S.limmag + 3.4) continue;
+      const p = project(o.alt, o.az, v);
+      if (!p) continue;
+      ctx.fillText(o.name, p[0] + 8, p[1] + 10);
+    }
+  }
+  ctx.restore();
+}
+
+function drawSelection(v) {
+  const target = S.selected;
+  if (!target) return;
+  const live = findLive(target);
+  if (!live || live.alt < -1) return;
+  const p = project(live.alt, live.az, v);
+  if (!p) return;
+  const t = (performance.now() % 2400) / 2400;
+  const r = 14 + Math.sin(t * TAU) * 1.6;
+  ctx.save();
+  ctx.strokeStyle = "rgba(217,164,65,0.85)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2 + Math.PI / 4;
+    ctx.moveTo(p[0] + Math.cos(a) * (r - 5), p[1] + Math.sin(a) * (r - 5));
+    ctx.lineTo(p[0] + Math.cos(a) * (r + 5), p[1] + Math.sin(a) * (r + 5));
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+
+function findLive(sel) {
+  const all = scene.objects.concat(scene.bodies, scene.deep);
+  for (const o of all) {
+    if (o.t === sel.t && (o.key || o.name) === (sel.key || sel.name)) return o;
+  }
+  return null;
+}
+
+/* ============================================================
+   Dossier
+   ============================================================ */
+const dossier = document.getElementById("dossier");
+
+function fmtRA(h) {
+  const hh = Math.floor(h), m = (h - hh) * 60, mm = Math.floor(m);
+  return hh + "h " + String(mm).padStart(2, "0") + "m " + String(Math.round((m - mm) * 60)).padStart(2, "0") + "s";
+}
+
+function fmtDec(d) {
+  const s = d < 0 ? "−" : "+", a = Math.abs(d);
+  const dd = Math.floor(a), m = (a - dd) * 60;
+  return s + dd + "° " + String(Math.floor(m)).padStart(2, "0") + "' " + String(Math.round((m - Math.floor(m)) * 60)).padStart(2, "0") + '"';
+}
+
+/* scan the next 24h for the next horizon crossing */
+function nextCrossing(o) {
+  const step = 5 * 60000;
+  let prev = o.alt;
+  for (let i = 1; i <= 288; i++) {
+    const t = S.time + i * step;
+    const jd = julian(t), lst = rev(gmst(jd) + S.lon);
+    let ra = o.ra, dec = o.dec;
+    if (o.t === "planet" || o.t === "moon" || o.t === "sun") {
+      const obl = OBL_J2000;
+      if (o.t === "sun") { const s = sunPos(jd); const eq = eclToEq(s.lon, s.lat, obl); ra = eq[0]; dec = eq[1]; }
+      else if (o.t === "moon") {
+        const dd = dayNumber(jd);
+        const mp = moonPos(dd, sunOfDate(dd));
+        const eq = eclToEq(mp.lon, mp.lat, obl); ra = eq[0]; dec = eq[1];
+      } else { const p = planetPos(o.name, jd); const eq = eclToEq(p.lon, p.lat, obl); ra = eq[0]; dec = eq[1]; }
+    }
+    const alt = horizontal(ra, dec, lst, S.lat)[0];
+    if ((prev < 0) !== (alt < 0)) {
+      const when = new Date(t - step / 2);
+      return (alt >= 0 ? "Rises " : "Sets ") + when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    prev = alt;
+  }
+  return o.alt >= 0 ? "Circumpolar — never sets" : "Below the horizon all day";
+}
+
+const GREEK = {
+  al: "α", be: "β", ga: "γ", de: "δ", ep: "ε", ze: "ζ", et: "η", th: "θ", io: "ι", ka: "κ",
+  la: "λ", mu: "μ", nu: "ν", xi: "ξ", omi: "ο", pi: "π", ro: "ρ", si: "σ", ta: "τ", up: "υ",
+  ph: "φ", ch: "χ", ps: "ψ", om: "ω"
+};
+
+function bayer(key) {
+  const stem = key.slice(0, -3);
+  return (GREEK[stem] || stem) + " " + key.slice(-3);
+}
+
+function describe(o) {
+  if (o.t === "star") {
+    const cn = CONST_NAMES[o.key.slice(-3)] || "";
+    return [o.name || bayer(o.key), "Star" + (cn ? " in " + cn : ""),
+      o.name ? bayer(o.key) + " — magnitude " + o.mag.toFixed(2) + " as seen from Earth."
+             : "Catalogued by its Bayer letter only; no widely used proper name."];
+  }
+  if (o.t === "planet") return [o.name, "Planet", o.note];
+  if (o.t === "sun") return ["Sun", "Star", o.note];
+  if (o.t === "moon") return ["Moon", "Satellite", o.note];
+  return [o.name, o.kind, o.note];
+}
+
+let dsEvent = "";                     // horizon-crossing scan is costly — computed on open only
+
+function openDossier(o) {
+  S.selected = { t: o.t, key: o.key, name: o.name };
+  dsEvent = nextCrossing(findLive(S.selected) || o);
+  renderDossier();
+  dossier.classList.add("open");
+}
+
+function renderDossier() {
+  if (!S.selected) return;
+  const live = findLive(S.selected);
+  if (!live) return;
+  const [name, kind, note] = describe(live);
+  $("dsname").textContent = name;
+  $("dskind").textContent = kind;
+
+  const up = live.alt >= 0;
+  const rows = [
+    ["Altitude", live.alt.toFixed(1) + "°"],
+    ["Azimuth", live.az.toFixed(1) + "° " + compass(live.az)],
+    ["Right asc.", fmtRA(live.ra)],
+    ["Declination", fmtDec(live.dec)],
+    ["Magnitude", live.t === "sun" ? "−26.7" : live.mag.toFixed(2).replace("-", "−")],
+    ["Next event", dsEvent]
+  ];
+  $("dstable").innerHTML = '<span class="label">Status</span><span class="v"><span class="horizon-chip ' +
+    (up ? "chip-up" : "chip-down") + '">' + (up ? "Above horizon" : "Below horizon") + "</span></span>" +
+    rows.map(r => '<span class="label">' + r[0] + '</span><span class="v">' + r[1] + "</span>").join("");
+  $("dsnote").textContent = note || "";
+  $("dsnote").style.display = note ? "" : "none";
+}
+
+function compass(az) {
+  const dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+  return dirs[Math.round(rev(az) / 22.5) % 16];
+}
+
+document.getElementById("dsclose").onclick = () => {
+  dossier.classList.remove("open");
+  S.selected = null;
+};
+
+/* ============================================================
+   Interaction
+   ============================================================ */
+let drag = null;
+
+cv.addEventListener("pointerdown", e => {
+  cv.setPointerCapture(e.pointerId);
+  drag = { x: e.clientX, y: e.clientY, moved: 0, spin: S.spin, alt: S.center.alt, az: S.center.az };
+  cv.classList.add("dragging");
+});
+
+cv.addEventListener("pointermove", e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.moved = Math.max(drag.moved, Math.hypot(dx, dy));
+  if (S.mode === "dome") {
+    S.spin = drag.spin + dx * 0.35;
+  } else {
+    S.tilt = false;
+    syncTiltBtn();
+    const k = S.fov / Math.min(W, H);
+    S.center.az = rev(drag.az - dx * k);
+    S.center.alt = Math.max(-25, Math.min(89, drag.alt + dy * k));
+  }
+});
+
+cv.addEventListener("pointerup", e => {
+  cv.classList.remove("dragging");
+  if (drag && drag.moved < 5) pick(e.clientX, e.clientY);
+  drag = null;
+});
+
+cv.addEventListener("pointercancel", () => { drag = null; cv.classList.remove("dragging"); });
+
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  if (S.mode === "dome") {
+    if (e.deltaY < 0) {
+      const v = view();
+      const aim = unproject(e.clientX - cv.getBoundingClientRect().left, e.clientY - cv.getBoundingClientRect().top, v);
+      if (aim) { S.center.alt = Math.max(0, Math.min(88, aim.alt)); S.center.az = aim.az; }
+      setMode("scope");
+      S.fov = 70;
+      toast("Scope mode — drag to look around, scroll to zoom");
+    }
+    return;
+  }
+  S.fov = Math.max(8, Math.min(120, S.fov * (e.deltaY > 0 ? 1.1 : 0.9)));
+  if (S.fov > 118) { setMode("dome"); toast("Dome mode — the whole sky at once"); }
+}, { passive: false });
+
+function pick(clientX, clientY) {
+  const rect = cv.getBoundingClientRect();
+  const x = clientX - rect.left, y = clientY - rect.top;
+  let best = null, bestD = 1e9;
+  for (const h of hitList) {
+    const d = Math.hypot(h.x - x, h.y - y);
+    if (d < h.r && d < bestD) { best = h; bestD = d; }
+  }
+  if (best) openDossier(best.obj);
+  else { dossier.classList.remove("open"); S.selected = null; }
+}
+
+/* ---- deck wiring ---- */
+function $(id) { return document.getElementById(id); }
+
+function setMode(m) {
+  S.mode = m;
+  $("mdome").setAttribute("aria-pressed", String(m === "dome"));
+  $("mscope").setAttribute("aria-pressed", String(m === "scope"));
+  if (m === "dome") { S.tilt = false; syncTiltBtn(); }
+}
+
+$("mdome").onclick = () => setMode("dome");
+$("mscope").onclick = () => setMode("scope");
+
+$("bplay").onclick = () => {
+  S.playing = !S.playing;
+  $("bplay").innerHTML = S.playing ? "&#10073;&#10073;" : "&#9654;";
+  $("bplay").setAttribute("aria-label", S.playing ? "Pause time" : "Play time");
+};
+
+document.querySelectorAll("[data-rate]").forEach(b => {
+  b.onclick = () => {
+    S.rate = Number(b.dataset.rate);
+    document.querySelectorAll("[data-rate]").forEach(o => o.setAttribute("aria-pressed", String(o === b)));
+  };
+});
+
+$("bnow").onclick = () => { S.time = Date.now(); toast("Back to now"); };
+
+document.querySelectorAll("[data-layer]").forEach(b => {
+  const key = b.dataset.layer;
+  b.setAttribute("aria-pressed", String(!!S.layers[key]));
+  b.onclick = () => {
+    S.layers[key] = !S.layers[key];
+    b.setAttribute("aria-pressed", String(S.layers[key]));
+    persist();
+  };
+});
+
+$("limmag").value = S.limmag;
+$("limmagval").textContent = S.limmag.toFixed(1);
+$("limmag").oninput = e => {
+  S.limmag = Number(e.target.value);
+  $("limmagval").textContent = S.limmag.toFixed(1);
+  persist();
+};
+
+const presetSel = $("preset");
+PRESETS.forEach(([n, la, lo]) => {
+  const o = document.createElement("option");
+  o.value = n; o.textContent = n;
+  presetSel.appendChild(o);
+});
+presetSel.onchange = () => {
+  const p = PRESETS.find(p => p[0] === presetSel.value);
+  if (!p) return;
+  setPlace(p[1], p[2], p[0]);
+};
+
+function setPlace(lat, lon, name) {
+  S.lat = Math.max(-89.9, Math.min(89.9, lat));
+  S.lon = ((lon + 180) % 360 + 360) % 360 - 180;
+  S.place = name;
+  $("lat").value = S.lat.toFixed(3);
+  $("lon").value = S.lon.toFixed(3);
+  persist();
+}
+
+$("lat").onchange = () => {
+  const v = parseFloat($("lat").value);
+  if (!isNaN(v)) setPlace(v, S.lon, "Custom");
+};
+$("lon").onchange = () => {
+  const v = parseFloat($("lon").value);
+  if (!isNaN(v)) setPlace(S.lat, v, "Custom");
+};
+
+$("bhere").onclick = () => {
+  if (!navigator.geolocation) { toast("This browser has no location service"); return; }
+  toast("Asking for your location…");
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      setPlace(pos.coords.latitude, pos.coords.longitude, "Your location");
+      presetSel.value = "";
+      toast("Located: " + S.lat.toFixed(2) + "°, " + S.lon.toFixed(2) + "°");
+    },
+    err => toast(err.code === 1 ? "Location permission denied — set it by hand below" : "Location unavailable — set it by hand below"),
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 }
+  );
+};
+
+/* ---- device orientation ---- */
+let tiltHandler = null;
+
+function syncTiltBtn() { $("btilt").setAttribute("aria-pressed", String(S.tilt)); }
+
+function startTilt() {
+  tiltHandler = ev => {
+    if (ev.alpha == null) return;
+    const alpha = (typeof ev.webkitCompassHeading === "number") ? 360 - ev.webkitCompassHeading : ev.alpha;
+    const scr = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+    const a = alpha * D2R, b = ev.beta * D2R, g = ev.gamma * D2R, s = scr * D2R;
+    const cA = Math.cos(a), sA = Math.sin(a), cB = Math.cos(b), sB = Math.sin(b), cG = Math.cos(g), sG = Math.sin(g);
+    /* R = Rz(alpha)Rx(beta)Ry(gamma), device -Z axis expressed in world ENU */
+    const m02 = -cA * sG - sA * sB * cG, m12 = -sA * sG + cA * sB * cG, m22 = -cB * cG;
+    let vx = -m02, vy = -m12, vz = -m22;
+    /* undo screen rotation about the viewing axis (only affects roll, ignore) */
+    void s;
+    const n = Math.hypot(vx, vy, vz) || 1;
+    vx /= n; vy /= n; vz /= n;
+    S.center.alt = Math.max(-25, Math.min(89, Math.asin(vz) * R2D));
+    S.center.az = rev(Math.atan2(vx, vy) * R2D);
+  };
+  window.addEventListener("deviceorientationabsolute", tiltHandler, true);
+  window.addEventListener("deviceorientation", tiltHandler, true);
+}
+
+function stopTilt() {
+  if (!tiltHandler) return;
+  window.removeEventListener("deviceorientationabsolute", tiltHandler, true);
+  window.removeEventListener("deviceorientation", tiltHandler, true);
+  tiltHandler = null;
+}
+
+$("btilt").onclick = async () => {
+  if (S.tilt) { S.tilt = false; stopTilt(); syncTiltBtn(); return; }
+  const DOE = window.DeviceOrientationEvent;
+  if (!DOE) { toast("This device has no orientation sensors"); return; }
+  if (typeof DOE.requestPermission === "function") {
+    try {
+      const res = await DOE.requestPermission();
+      if (res !== "granted") { toast("Motion access denied"); return; }
+    } catch (e) { toast("Motion access unavailable"); return; }
+  }
+  S.tilt = true;
+  setMode("scope");
+  S.fov = 65;
+  startTilt();
+  syncTiltBtn();
+  toast("Point your device at the sky. Compass accuracy varies by device.");
+};
+
+/* ---- search ---- */
+const dl = $("objectlist");
+function fillSearch() {
+  const names = [];
+  STARS.forEach(s => { if (s[1]) names.push(s[1]); });
+  PLANET_NAMES.forEach(n => names.push(n));
+  names.push("Moon", "Sun");
+  DEEP.forEach(o => names.push(o[0]));
+  Object.values(CONST_NAMES).forEach(n => names.push(n));
+  dl.innerHTML = names.sort().map(n => '<option value="' + n + '"></option>').join("");
+}
+fillSearch();
+
+$("search").addEventListener("change", () => {
+  const q = $("search").value.trim().toLowerCase();
+  if (!q) return;
+  const all = scene.objects.concat(scene.bodies, scene.deep);
+  let hit = all.find(o => (o.name || "").toLowerCase() === q);
+  if (!hit) hit = all.find(o => (o.name || "").toLowerCase().startsWith(q));
+  if (!hit) {
+    /* try a constellation: aim at the centroid of its figure */
+    const abbr = Object.keys(CONST_NAMES).find(k => CONST_NAMES[k].toLowerCase() === q);
+    const fig = abbr && FIGURES.find(f => f[0] === abbr);
+    if (fig) {
+      let sa = 0, sx = 0, sy = 0, n = 0;
+      for (const path of fig[1]) for (const key of path) {
+        const st = starIndex[key];
+        if (!st) continue;
+        const h = horizontal(st[2], st[3], scene.lst, S.lat);
+        sa += h[0]; sx += Math.sin(h[1] * D2R); sy += Math.cos(h[1] * D2R); n++;
+      }
+      if (n) {
+        setMode("scope");
+        S.fov = 50;
+        S.tilt = false; stopTilt(); syncTiltBtn();
+        S.center.alt = Math.max(-10, Math.min(85, sa / n));
+        S.center.az = rev(Math.atan2(sx / n, sy / n) * R2D);
+        toast(CONST_NAMES[abbr] + (sa / n < 0 ? " is below your horizon right now" : " centred"));
+      }
+      return;
+    }
+    toast("No match for “" + $("search").value + "”");
+    return;
+  }
+  setMode("scope");
+  S.fov = Math.min(S.fov, 45);
+  S.tilt = false; stopTilt(); syncTiltBtn();
+  S.center.alt = Math.max(-12, Math.min(88, hit.alt));
+  S.center.az = hit.az;
+  openDossier(hit);
+  if (hit.alt < 0) toast(hit.name + " is below the horizon — " + Math.abs(hit.alt).toFixed(0) + "° down");
+});
+
+/* ---- mobile deck ---- */
+$("decktoggle").onclick = () => {
+  const open = $("deck").classList.toggle("open");
+  $("decktoggle").setAttribute("aria-expanded", String(open));
+};
+
+/* ---- keyboard ---- */
+window.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (e.key === " ") { e.preventDefault(); $("bplay").click(); }
+  else if (e.key === "n") $("bnow").click();
+  else if (e.key === "d") setMode(S.mode === "dome" ? "scope" : "dome");
+  else if (e.key === "Escape") { dossier.classList.remove("open"); S.selected = null; }
+  else if (e.key === "ArrowLeft") { if (S.mode === "dome") S.spin += 5; else S.center.az = rev(S.center.az - 4); }
+  else if (e.key === "ArrowRight") { if (S.mode === "dome") S.spin -= 5; else S.center.az = rev(S.center.az + 4); }
+  else if (e.key === "ArrowUp" && S.mode === "scope") S.center.alt = Math.min(89, S.center.alt + 4);
+  else if (e.key === "ArrowDown" && S.mode === "scope") S.center.alt = Math.max(-25, S.center.alt - 4);
+});
+
+/* ---- toast ---- */
+let toastTimer = null;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 3400);
+}
+
+/* ============================================================
+   Loop
+   ============================================================ */
+const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+S.intro = reduced ? 1 : 0;
+
+let last = performance.now();
+let dsTick = 0, dsEventTick = 0;
+
+let errCount = 0;
+
+function frame(now) {
+  /* the loop must re-arm even if a frame throws, or the sky freezes for good */
+  try {
+    const dt = Math.min(120, now - last);
+    last = now;
+    if (S.playing) S.time += dt * S.rate;
+    if (S.intro < 1) S.intro = Math.min(1, S.intro + dt / 1300);
+
+    resize();
+    buildScene();
+    draw();
+    updateReadout();
+
+    /* keep an open dossier in step with the clock */
+    if (S.selected && dossier.classList.contains("open") && now - dsTick > 500) {
+      dsTick = now;
+      if (now - dsEventTick > 5000) {
+        dsEventTick = now;
+        const live = findLive(S.selected);
+        if (live) dsEvent = nextCrossing(live);
+      }
+      renderDossier();
+    }
+  } catch (err) {
+    if (errCount++ < 3) console.error("Overhead: frame failed", err);
+  }
+  requestAnimationFrame(frame);
+}
+
+function updateReadout() {
+  $("rdplace").textContent = S.place + "  " +
+    Math.abs(S.lat).toFixed(2) + "°" + (S.lat >= 0 ? "N" : "S") + ", " +
+    Math.abs(S.lon).toFixed(2) + "°" + (S.lon >= 0 ? "E" : "W");
+  const d = new Date(S.time);
+  $("rdtime").textContent = d.toLocaleString([], {
+    year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit"
+  });
+  const lstH = scene.lst / 15;
+  const hh = Math.floor(lstH), mm = Math.floor((lstH - hh) * 60), ss = Math.round(((lstH - hh) * 60 - mm) * 60);
+  $("rdlst").textContent = String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") + ":" + String(Math.min(59, ss)).padStart(2, "0") + " LST";
+  const [txt, col] = phaseLabel(scene.sunAlt);
+  $("rdphase").textContent = txt;
+  document.querySelector("#skyphase .dot").style.background = col;
+}
+
+/* Bootstrap defensively, then start the loop regardless: the loop re-arms itself
+   on failure, so a hiccup here must not cost the whole page. */
+try {
+  window.addEventListener("resize", resize);
+  window.addEventListener("orientationchange", resize);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
+  resize();
+  setPlace(S.lat, S.lon, S.place);
+  buildScene();
+} catch (err) {
+  console.error("Overhead: start-up failed", err);
+}
+requestAnimationFrame(frame);
+
+let firstVisit = true;
+try { firstVisit = !localStorage.getItem("overhead"); } catch (e) { /* storage blocked */ }
+if (firstVisit) {
+  setTimeout(() => toast("Drag to spin the sky. Scroll to zoom in. Tap anything to identify it."), 1200);
+}
+</script>
+</body>
+</html>
