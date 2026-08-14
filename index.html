@@ -2723,6 +2723,92 @@ function orthonormalize(o) {
   ];
 }
 
+/* ============================================================
+   Gyroscope
+   ------------------------------------------------------------
+   The orientation event is already fused and absolute, but it arrives when it
+   arrives and carries the compass's hesitation with it. The rate gyro is the
+   opposite: no idea which way north is, but it knows precisely how fast the phone
+   is turning, right now. So integrate the gyro between readings and let the
+   orientation stream pull the result back into agreement slowly — the usual
+   complementary filter, and the reason the sky can stop lagging a turn without
+   also starting to shiver.
+
+   The catch is that platforms disagree about the sign of a rotation rate, and a
+   gyro wired backwards is worse than no gyro at all. So it has to earn its place:
+   every absolute reading is compared with what the gyro predicted, and it is only
+   used once it has agreed several times over. Persistent disagreement flips it,
+   and disagreement that survives flipping switches it off for the session.
+   ============================================================ */
+let gyroRate = null;                 // deg/s about the device's own x, y, z
+let gyroSign = 1, gyroVote = 0, gyroFlips = 0;
+let gyroUse = false, gyroDead = false;
+let gyroAccum = [0, 0, 0];           // world-frame rotation since the last reading, deg
+let prevTarget = null;
+let motionHandler = null;
+
+function rodrigues(v, ax, sinT, cosT) {
+  const dot = ax[0] * v[0] + ax[1] * v[1] + ax[2] * v[2];
+  return [
+    v[0] * cosT + (ax[1] * v[2] - ax[2] * v[1]) * sinT + ax[0] * dot * (1 - cosT),
+    v[1] * cosT + (ax[2] * v[0] - ax[0] * v[2]) * sinT + ax[1] * dot * (1 - cosT),
+    v[2] * cosT + (ax[0] * v[1] - ax[1] * v[0]) * sinT + ax[2] * dot * (1 - cosT)
+  ];
+}
+
+/* the rate arrives about the phone's own axes, so it has to be carried into the
+   world frame through the basis we are already holding */
+function gyroWorld(o) {
+  const s = lastRaw ? lastRaw.scr : 0;
+  const cs = cos(s), sn = sin(s);
+  const X = [o.Rv[0] * cs + o.U[0] * sn, o.Rv[1] * cs + o.U[1] * sn, o.Rv[2] * cs + o.U[2] * sn];
+  const Y = [-o.Rv[0] * sn + o.U[0] * cs, -o.Rv[1] * sn + o.U[1] * cs, -o.Rv[2] * sn + o.U[2] * cs];
+  const Z = [-o.F[0], -o.F[1], -o.F[2]];
+  const rx = gyroRate.x * gyroSign, ry = gyroRate.y * gyroSign, rz = gyroRate.z * gyroSign;
+  return [
+    X[0] * rx + Y[0] * ry + Z[0] * rz,
+    X[1] * rx + Y[1] * ry + Z[1] * rz,
+    X[2] * rx + Y[2] * ry + Z[2] * rz
+  ];
+}
+
+/* Compare where the gyro said we would be with where the orientation stream says
+   we are. Both are rotation vectors in the world frame, so agreement is a dot
+   product — and the length ratio catches a gyro reporting radians per second. */
+function judgeGyro(target) {
+  if (prevTarget) {
+    const rot = [0, 0, 0];
+    for (const key of ["F", "Rv", "U"]) {
+      const a = prevTarget[key], b = target[key];
+      rot[0] += (a[1] * b[2] - a[2] * b[1]) * 0.5;
+      rot[1] += (a[2] * b[0] - a[0] * b[2]) * 0.5;
+      rot[2] += (a[0] * b[1] - a[1] * b[0]) * 0.5;
+    }
+    const measured = Math.hypot(rot[0], rot[1], rot[2]) * R2D;
+    const predicted = Math.hypot(gyroAccum[0], gyroAccum[1], gyroAccum[2]);
+    if (measured > 0.35 && predicted > 0.05) {
+      const dot = (rot[0] * R2D * gyroAccum[0] + rot[1] * R2D * gyroAccum[1] +
+                   rot[2] * R2D * gyroAccum[2]) / (measured * predicted);
+      const ratio = predicted / measured;
+      if (dot > 0.4 && ratio > 0.4 && ratio < 2.5) {
+        if (++gyroVote > 5) { gyroUse = true; gyroVote = 6; }
+      } else if (dot < -0.4 && ratio > 0.4 && ratio < 2.5) {
+        if (--gyroVote < -5) {
+          gyroSign = -gyroSign;
+          gyroVote = 0;
+          gyroUse = false;
+          if (++gyroFlips > 3) { gyroDead = true; gyroUse = false; }
+        }
+      } else if (ratio > 4 || ratio < 0.25) {
+        /* wrong units or a wildly wrong scale: nothing to be salvaged by flipping */
+        if (--gyroVote < -8) { gyroDead = true; gyroUse = false; }
+      }
+    }
+  }
+  gyroAccum = [0, 0, 0];
+  prevTarget = { F: target.F.slice(), Rv: target.Rv.slice(), U: target.U.slice() };
+}
+
 /* sensors arrive at their own cadence and jitter by a degree or two; ease toward
    the reading each frame instead, or every star shivers */
 function stepTilt(dt) {
@@ -2734,7 +2820,25 @@ function stepTilt(dt) {
   if (!S.dev) {
     S.dev = { F: t.F.slice(), Rv: t.Rv.slice(), U: t.U.slice() };
   } else {
-    const k = 1 - Math.exp(-dt / 70);
+    if (gyroRate && !gyroDead) {
+      const w = gyroWorld(S.dev);
+      const secs = dt / 1000;
+      gyroAccum[0] += w[0] * secs; gyroAccum[1] += w[1] * secs; gyroAccum[2] += w[2] * secs;
+      if (gyroUse) {
+        const mag = Math.hypot(w[0], w[1], w[2]);
+        const deg = mag * secs;
+        if (deg > 0.004 && deg < 40) {
+          const ax = [w[0] / mag, w[1] / mag, w[2] / mag];
+          const th = deg * D2R, sinT = Math.sin(th), cosT = Math.cos(th);
+          S.dev.F = rodrigues(S.dev.F, ax, sinT, cosT);
+          S.dev.Rv = rodrigues(S.dev.Rv, ax, sinT, cosT);
+          S.dev.U = rodrigues(S.dev.U, ax, sinT, cosT);
+        }
+      }
+    }
+    /* with the gyro carrying the motion the pull towards the absolute reading can
+       be gentle, which is what takes the shimmer out; without it, it is all we have */
+    const k = 1 - Math.exp(-dt / (gyroUse ? 420 : 70));
     for (const key of ["F", "Rv", "U"]) {
       for (let i = 0; i < 3; i++) S.dev[key][i] += (t[key][i] - S.dev[key][i]) * k;
     }
@@ -2829,6 +2933,7 @@ function readOrientation(ev, absolute) {
   lastRaw = { a: alpha, b: ev.beta, g: ev.gamma, wk: wk, scr: screenAngle() };
   if (heading == null) return;
   S.devTarget = deviceBasis(heading, ev.beta || 0, ev.gamma || 0, lastRaw.scr);
+  if (gyroRate && !gyroDead) judgeGyro(S.devTarget);
   if (!absHeading && !warnedRelative) {
     warnedRelative = true;
     toast("No absolute compass here — drag sideways to line the sky up");
@@ -2853,6 +2958,18 @@ function startTilt() {
   tiltWatchdog = false;
   lastRaw = null;
   tiltStart = performance.now();
+  gyroRate = null; gyroVote = 0; gyroFlips = 0;
+  gyroUse = false; gyroDead = false;
+  gyroAccum = [0, 0, 0]; prevTarget = null;
+  motionHandler = ev => {
+    const r = ev.rotationRate;
+    if (!r) return;
+    if (r.alpha == null && r.beta == null && r.gamma == null) return;
+    /* alpha turns about z, beta about x, gamma about y */
+    gyroRate = { x: r.beta || 0, y: r.gamma || 0, z: r.alpha || 0 };
+  };
+  window.addEventListener("devicemotion", motionHandler, true);
+
   tiltAbs = ev => { absStream = true; readOrientation(ev, true); };
   /* the plain event is the fallback, and it stands down only once the absolute
      event has proved it is actually firing — never merely because a reading
@@ -2863,6 +2980,10 @@ function startTilt() {
 }
 
 function stopTilt() {
+  if (motionHandler) window.removeEventListener("devicemotion", motionHandler, true);
+  motionHandler = null;
+  gyroRate = null;
+  gyroUse = false;
   if (tiltAbs) window.removeEventListener("deviceorientationabsolute", tiltAbs, true);
   if (tiltRel) window.removeEventListener("deviceorientation", tiltRel, true);
   tiltAbs = tiltRel = null;
@@ -2921,6 +3042,13 @@ async function toggleTilt() {
       return;
     }
   }
+  /* the rate gyro sits behind a second iOS prompt, and asking for it must still
+     count as part of the tap that started all this */
+  const DME = window.DeviceMotionEvent;
+  if (DME && typeof DME.requestPermission === "function") {
+    try { await DME.requestPermission(); } catch (e) { /* carry on without it */ }
+  }
+
   setMode("scope");
   S.fov = 65;
   S.headOffset = 0;
