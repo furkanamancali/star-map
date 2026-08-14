@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Overhead</title>
+<meta name="description" content="The sky above you right now — stars to magnitude 6.5, the planets and the Moon. Point your phone at the sky to see that part of it.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#05070d">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png" sizes="192x192" type="image/png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Overhead">
 </head>
 <body>
 <style>
@@ -79,6 +88,14 @@ button, input, select {
 }
 
 #sky.dragging { cursor: grabbing; }
+
+#nightfilter { position: absolute; }
+
+html.night body { filter: url(#redify); }
+
+/* the toggle itself sits inside the filtered page, so it is red like everything
+   else; the pressed state has to read through that */
+html.night #bnight { border-color: rgba(255, 255, 255, 0.55); }
 
 /* ---------- shared chrome ---------- */
 
@@ -540,6 +557,17 @@ body:has(#deck.open) #arbtn { display: none; }
   <canvas id="sky" aria-label="Live star map of the sky above your location"></canvas>
 </div>
 
+<!-- night vision: everything through a matrix that keeps only a red channel, which
+     is what preserves dark adaptation. A hue-rotate approximation still leaks blue. -->
+<svg id="nightfilter" width="0" height="0" aria-hidden="true" focusable="false">
+  <filter id="redify" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values="0.42 0.72 0.14 0 0
+                                         0    0    0    0 0
+                                         0    0    0    0 0
+                                         0    0    0    1 0"/>
+  </filter>
+</svg>
+
 <header id="masthead" class="rail">
   <div class="crest">
     <h1>Over<em>head</em></h1>
@@ -593,6 +621,13 @@ body:has(#deck.open) #arbtn { display: none; }
       <button class="btn" data-rate="86400" aria-pressed="false">1d/s</button>
     </div>
     <button class="btn" id="bnow">Now</button>
+    <button class="btn" id="bsunset" title="Jump to the next sunset">Sunset</button>
+    <button class="btn" id="bmid" title="Jump to tonight's midnight">Midnight</button>
+    <div class="field" id="shiftfield">
+      <span class="label">Shift</span>
+      <input type="range" id="tshift" min="-1440" max="1440" step="5" value="0" aria-label="Shift time from now, in minutes">
+      <span class="num" id="tshiftval" style="font-size:12px;width:52px;text-align:right">now</span>
+    </div>
     <span class="spacer"></span>
     <div class="field">
       <span class="label">Lat</span><input id="lat" class="num" inputmode="decimal" aria-label="Latitude">
@@ -614,6 +649,7 @@ body:has(#deck.open) #arbtn { display: none; }
     <button class="btn" data-layer="grid" aria-pressed="false">Grid</button>
     <button class="btn" data-layer="ecliptic" aria-pressed="false">Ecliptic</button>
     <button class="btn" data-layer="realsky" aria-pressed="false" title="Let daylight and twilight wash out the stars">Real sky</button>
+    <button class="btn" id="bnight" aria-pressed="false" title="Red screen, to keep your eyes dark-adapted">Night vision</button>
     <span class="spacer"></span>
     <div class="field">
       <span class="label">Limit mag</span>
@@ -1365,6 +1401,7 @@ const S = {
   headOffset: 0,             // manual compass trim, deg
   tiltNudged: false,
   limmag: 5.6,
+  night: false,
   layers: { lines: true, names: true, milkyway: true, planets: true, deep: true, grid: false, ecliptic: false, realsky: false },
   selected: null,
   hover: null,
@@ -1377,13 +1414,14 @@ try {
     S.lat = saved.lat; S.lon = saved.lon; S.place = saved.place || "Custom";
     if (saved.layers) Object.assign(S.layers, saved.layers);
     if (typeof saved.limmag === "number") S.limmag = saved.limmag;
+    S.night = !!saved.night;
   }
 } catch (e) { /* first visit */ }
 
 function persist() {
   try {
     localStorage.setItem("overhead", JSON.stringify({
-      lat: S.lat, lon: S.lon, place: S.place, layers: S.layers, limmag: S.limmag
+      lat: S.lat, lon: S.lon, place: S.place, layers: S.layers, limmag: S.limmag, night: S.night
     }));
   } catch (e) { /* storage blocked — session only */ }
 }
@@ -2349,7 +2387,97 @@ document.querySelectorAll("[data-rate]").forEach(b => {
   };
 });
 
-$("bnow").onclick = () => { S.time = Date.now(); toast("Back to now"); };
+$("bnow").onclick = () => { S.time = Date.now(); syncShift(); toast("Back to now"); };
+
+/* ---- time scrubbing ---- */
+
+function sunAltAt(t) {
+  const jd = julian(t), lst = rev(gmst(jd) + S.lon);
+  const sun = sunPos(jd);
+  const eq = eclToEq(sun.lon, sun.lat, OBL_J2000);
+  return horizontal(eq[0], eq[1], lst, S.lat)[0];
+}
+
+/* the Sun crosses -0.833° when its upper limb touches the horizon, refraction
+   and semidiameter included; scan coarsely for the crossing, then bisect it */
+const SUN_HORIZON = -0.833;
+
+function nextSunCrossing(from, rising) {
+  const step = 5 * 60000;
+  let prev = sunAltAt(from);
+  for (let i = 1; i <= 48 * 12; i++) {
+    const t = from + i * step;
+    const a = sunAltAt(t);
+    const crossed = rising ? (prev < SUN_HORIZON && a >= SUN_HORIZON)
+                           : (prev > SUN_HORIZON && a <= SUN_HORIZON);
+    if (crossed) {
+      let lo = t - step, hi = t;
+      for (let k = 0; k < 24; k++) {
+        const mid = (lo + hi) / 2;
+        const am = sunAltAt(mid);
+        if ((am >= SUN_HORIZON) === rising) hi = mid; else lo = mid;
+      }
+      return (lo + hi) / 2;
+    }
+    prev = a;
+  }
+  return null;                       // polar summer or winter: no crossing in two days
+}
+
+function jumpTo(t, label) {
+  if (t == null) {
+    toast("The Sun does not cross the horizon here for the next two days");
+    return;
+  }
+  S.time = t;
+  S.playing = false;
+  $("bplay").innerHTML = "&#9654;";
+  $("bplay").setAttribute("aria-label", "Play time");
+  syncShift();
+  toast(label + " — " + new Date(t).toLocaleString([], { hour: "2-digit", minute: "2-digit" }));
+}
+
+$("bsunset").onclick = () => jumpTo(nextSunCrossing(S.time, false), "Next sunset");
+
+$("bmid").onclick = () => {
+  const d = new Date(S.time);
+  d.setHours(24, 0, 0, 0);           // the midnight that ends today, locally
+  jumpTo(d.getTime(), "Midnight");
+};
+
+/* the slider reads as an offset from the real present, so it stays meaningful
+   however the clock got where it is */
+function syncShift() {
+  const mins = Math.round((S.time - Date.now()) / 60000);
+  const el = $("tshift");
+  /* while it is being dragged the slider is the source of truth, not the clock */
+  if (document.activeElement !== el) el.value = String(Math.max(-1440, Math.min(1440, mins)));
+  const a = Math.abs(mins);
+  $("tshiftval").textContent = a < 1 ? "now"
+    : (mins < 0 ? "−" : "+") + (a < 60 ? a + "m"
+      : Math.floor(a / 60) + "h" + (a % 60 ? String(a % 60).padStart(2, "0") : ""));
+}
+
+$("tshift").oninput = e => {
+  S.time = Date.now() + parseFloat(e.target.value) * 60000;
+  S.playing = false;
+  $("bplay").innerHTML = "&#9654;";
+  $("bplay").setAttribute("aria-label", "Play time");
+  syncShift();
+};
+
+function syncNight() {
+  document.documentElement.classList.toggle("night", S.night);
+  $("bnight").setAttribute("aria-pressed", String(S.night));
+}
+
+$("bnight").onclick = () => {
+  S.night = !S.night;
+  syncNight();
+  persist();
+  toast(S.night ? "Night vision on — give your eyes twenty minutes to adapt" : "Night vision off");
+};
+syncNight();
 
 document.querySelectorAll("[data-layer]").forEach(b => {
   const key = b.dataset.layer;
@@ -2688,6 +2816,7 @@ window.addEventListener("keydown", e => {
   if (e.key === " ") { e.preventDefault(); $("bplay").click(); }
   else if (e.key === "n") $("bnow").click();
   else if (e.key === "d") setMode(S.mode === "dome" ? "scope" : "dome");
+  else if (e.key === "r") $("bnight").click();
   else if (e.key === "Escape") { dossier.classList.remove("open"); S.selected = null; }
   else if (e.key === "ArrowLeft") { if (S.mode === "dome") S.spin += 5; else S.center.az = rev(S.center.az - 4); }
   else if (e.key === "ArrowRight") { if (S.mode === "dome") S.spin -= 5; else S.center.az = rev(S.center.az + 4); }
@@ -2758,6 +2887,7 @@ function updateReadout() {
   const lstH = scene.lst / 15;
   const hh = Math.floor(lstH), mm = Math.floor((lstH - hh) * 60), ss = Math.round(((lstH - hh) * 60 - mm) * 60);
   $("rdlst").textContent = String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") + ":" + String(Math.min(59, ss)).padStart(2, "0") + " LST";
+  syncShift();
   const [txt, col] = phaseLabel(scene.sunAlt);
   $("rdphase").textContent = txt;
   document.querySelector("#skyphase .dot").style.background = col;
@@ -2776,6 +2906,14 @@ try {
   console.error("Overhead: start-up failed", err);
 }
 requestAnimationFrame(frame);
+
+/* offline: the map holds everything it needs, so a stargazer out of signal keeps
+   a working sky, and the phone can install it to the home screen */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => { /* http, or blocked */ });
+  });
+}
 
 let firstVisit = true;
 try { firstVisit = !localStorage.getItem("overhead"); } catch (e) { /* storage blocked */ }
