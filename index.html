@@ -1308,6 +1308,11 @@ function drawFaint(v, limit, vis) {
     if (up < -0.01) continue;               // below the horizon
     const east = -B, north = cp * z - sp * A;
 
+    /* the air takes its cut here too, and takes most of it in the last few degrees */
+    const ext = extinction(up);
+    const m2 = m + ext;
+    if (m2 > cut) continue;
+
     let px, py;
     if (dome) {
       /* r = R tan(z/2) straight from the direction cosines. Math.hypot is a slow
@@ -1329,15 +1334,21 @@ function drawFaint(v, limit, vis) {
     }
     if (px < -margin || px > W + margin || py < -margin || py > H + margin) continue;
 
-    const fade = Math.min(1, (limit + 0.4 - m) / 0.9) * vis;
+    const head = limit + 0.4 - m2;
+    const fade = Math.min(1, head / 0.9) * vis;
     if (fade <= 0.04) continue;
 
     const band = Math.min(FBANDS - 1, Math.max(0, Math.round(fade * FBANDS) - 1));
-    const cbucket = Math.min(7, Math.max(0, (f.bvc[i] * 8 / 36) | 0));
+    /* reddened by the air, and drained of colour as it approaches the limit, the
+       same two corrections the named stars get — done on the bucket index, which is
+       all the resolution eight colour buckets can carry anyway */
+    let cb = (f.bvc[i] * 8 / 36) + ext * (K_RED / K_EXT) * 3.5;
+    if (head < 2.6) cb = 2.5 + (cb - 2.5) * Math.max(0.15, head / 2.6);
+    const cbucket = cb < 0 ? 0 : (cb > 7 ? 7 : cb | 0);
     const b = cbucket * FBANDS + band;
     const k = fBucket[b]++;
     fBx[b][k] = px; fBy[b][k] = py;
-    fBr[b][k] = Math.min(2.6, starRadius(m, limit, zoom));
+    fBr[b][k] = Math.min(2.6, starRadius(m2, limit, zoom));
 
     const s = f.shown++;
     f.sx[s] = px; f.sy[s] = py; f.idx[s] = i;
@@ -1649,7 +1660,14 @@ function draw() {
   const v = view();
   const dark = S.layers.realsky ? darkness(scene.sunAlt) : 1;
   const starVis = S.layers.realsky ? Math.pow(dark, 1.6) : 1;
-  const limit = S.limmag - (1 - starVis) * 5;
+  let limit = S.limmag - (1 - starVis) * 5;
+  /* a full Moon overhead costs a couple of magnitudes; a thin crescent costs almost
+     nothing, and one about to set costs little either */
+  const moonB = scene.bodies[1];
+  if (S.layers.realsky && moonB && moonB.alt > -1) {
+    const up = Math.max(0, sin(moonB.alt));
+    limit -= 2.2 * Math.pow(moonB.illum, 1.7) * Math.pow(up, 0.6);
+  }
 
   hitList = [];
   paintGround(v, dark);
@@ -1691,6 +1709,25 @@ function paintGround(v, dark) {
   g.addColorStop(1, bot);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
+
+  /* Twilight is the Sun's light scattered forwards, so it sits around the Sun's own
+     bearing — the west after sunset, the east before dawn — instead of smeared
+     evenly along the bottom of the frame as a vertical ramp would have it. */
+  if (S.layers.realsky && sa > -14) {
+    const sun = scene.bodies[0];
+    const sp = sun && project(Math.max(sun.alt, 0.8), sun.az, v);
+    if (sp) {
+      const t = sa > 0 ? 1 : Math.max(0, (sa + 14) / 14);
+      const rad = Math.max(W, H) * (0.5 + 0.55 * t);
+      const g2 = ctx.createRadialGradient(sp[0], sp[1], 0, sp[0], sp[1], rad);
+      const a = 0.62 * Math.pow(t, 1.5);
+      g2.addColorStop(0, "rgba(255,176,96," + (a * 0.95).toFixed(3) + ")");
+      g2.addColorStop(0.35, "rgba(214,120,86," + (a * 0.42).toFixed(3) + ")");
+      g2.addColorStop(1, "rgba(60,84,140,0)");
+      ctx.fillStyle = g2;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
 
   if (v.mode === "dome") {
     /* mask everything outside the dome as ground */
@@ -1802,28 +1839,89 @@ function drawFigures(v, vis) {
   ctx.restore();
 }
 
+/* ============================================================
+   Atmosphere
+   ------------------------------------------------------------
+   Air dims and reddens everything it is looked through. Young's airmass, about
+   0.23 magnitudes lost per airmass in V at a decent sea-level site, and roughly
+   0.15 more lost in B than in V — which is why anything low is not merely fainter
+   than it is overhead but oranger, and why the horizon empties out.
+   ============================================================ */
+const K_EXT = 0.23, K_RED = 0.15, EXT_MAX = 5.5;
+
+function airmass(sinAlt) {
+  const s = Math.max(sinAlt, -0.02);
+  return 1 / (s + 0.025 * Math.exp(-11 * s));
+}
+
+/* magnitudes lost, from the sine of the altitude — a table because the catalogue
+   asks for this thousands of times a frame and Math.exp is not free */
+const EXT_LUT = (() => {
+  const n = 258, a = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    a[i] = Math.min(EXT_MAX, K_EXT * (airmass(-0.02 + 1.02 * i / (n - 2)) - 1));
+  }
+  return a;
+})();
+
+function extinction(sinAlt) {
+  const t = (sinAlt + 0.02) / 1.02 * 256;
+  const i = t < 0 ? 0 : (t > 255 ? 255 : t | 0);
+  return EXT_LUT[i] + (EXT_LUT[i + 1] - EXT_LUT[i]) * (t - i);
+}
+
 function starRadius(mag, limit, zoom) {
-  const r = 0.72 + Math.max(0, limit - mag) * 0.46;
-  return Math.min(9, r) * zoom;
+  /* Pogson: a magnitude is a factor 2.512 in flux, so size cannot be linear in it.
+     Letting area follow the square root of flux keeps Sirius from becoming a blob
+     while the fifth magnitude stays a point, which is how a real sky reads. */
+  const r = 0.62 * Math.pow(10, 0.1 * Math.max(-1.6, limit - mag));
+  return Math.min(9, Math.max(0.42, r)) * zoom;
+}
+
+/* The dark-adapted eye is nearly colour-blind: below about second magnitude a star
+   reads as white however hot it is. Bleed the tint out as stars approach the limit,
+   and redden what the air has reddened. */
+function starTint(bv, extMag, headroom) {
+  const c = bvColor(bv + extMag * (K_RED / K_EXT));
+  const sat = Math.min(1, Math.max(0.12, headroom / 3.2));
+  const g = 0.30 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+  return [
+    Math.round(g + (c[0] - g) * sat),
+    Math.round(g + (c[1] - g) * sat),
+    Math.round(g + (c[2] - g) * sat)
+  ];
 }
 
 function drawStars(v, limit, vis) {
   const zoom = v.mode === "scope" ? Math.min(2.2, Math.max(0.8, 55 / S.fov)) : 1;
   ctx.save();
+  const now = performance.now();
   for (const o of scene.objects) {
     if (o.mag > limit + 0.4) continue;
     if (o.alt < -0.6) continue;
     const p = project(o.alt, o.az, v);
     if (!p) continue;
 
+    /* what the air leaves of it */
+    const ext = extinction(sin(o.alt));
+    const mag = o.mag + ext;
+    if (mag > limit + 0.4) continue;
+
     const introGate = Math.min(1, Math.max(0, S.intro * 3.2 - (o.mag + 1.6) / 4));
     if (introGate <= 0) continue;
 
-    const fade = Math.min(1, (limit + 0.4 - o.mag) / 0.9) * vis * introGate;
+    let fade = Math.min(1, (limit + 0.4 - mag) / 0.9) * vis * introGate;
     if (fade <= 0.02) continue;
 
-    const c = bvColor(o.bv);
-    const r = starRadius(o.mag, limit, zoom);
+    /* scintillation is an atmospheric effect, so it rises with the air in the way:
+       steady overhead, restless near the horizon */
+    if (ext > 0.12) {
+      const amp = Math.min(0.34, (ext - 0.12) * 0.30);
+      fade *= 1 - amp * (0.5 + 0.5 * Math.sin(now / 190 + o.ra * 9 + o.dec));
+    }
+
+    const c = starTint(o.bv, ext, limit + 0.4 - mag);
+    const r = starRadius(mag, limit, zoom);
 
     if (r > 1.9) {
       ctx.globalAlpha = 0.30 * fade;
@@ -1895,17 +1993,23 @@ function drawBodies(v, dark) {
 
     if (b.t === "moon") {
       const r = Math.max(7, ppd * 0.26);
-      ctx.globalAlpha = 0.5;
-      const gr = r * 3.4;
+      /* the halo is the Moon's own light scattered in the air, so it grows with the
+         lit fraction and with the depth of atmosphere it is shining through */
+      const ext = extinction(sin(Math.max(0, b.alt)));
+      const halo = (0.16 + 0.62 * b.illum) * Math.max(0.25, 1 - ext * 0.5);
+      ctx.globalAlpha = halo;
+      const gr = r * (3.0 + 3.6 * b.illum);
       ctx.drawImage(glow, p[0] - gr, p[1] - gr, gr * 2, gr * 2);
       ctx.globalAlpha = 1;
-      drawMoon(p[0], p[1], r, b.illum, b.waxing);
+      drawMoon(p[0], p[1], r, b.illum, b.waxing, limbAngle(v, b, scene.bodies[0], p));
       pushHit(v, p[0], p[1], r + 8, b);
       continue;
     }
 
-    const r = Math.max(1.8, 1.5 + Math.max(0, 4.2 - b.mag) * 0.62) * (v.mode === "scope" ? Math.min(2, 55 / S.fov) : 1);
-    ctx.globalAlpha = 0.42;
+    const pext = extinction(sin(Math.max(-0.5, b.alt)));
+    const pmag = b.mag + pext;
+    const r = Math.max(1.8, 1.5 + Math.max(0, 4.2 - pmag) * 0.62) * (v.mode === "scope" ? Math.min(2, 55 / S.fov) : 1);
+    ctx.globalAlpha = 0.42 * Math.max(0.25, 1 - pext * 0.55);
     const gr = r * 5;
     ctx.drawImage(glow, p[0] - gr, p[1] - gr, gr * 2, gr * 2);
     ctx.globalAlpha = 1;
@@ -1924,15 +2028,42 @@ function drawBodies(v, dark) {
   ctx.restore();
 }
 
-function drawMoon(x, y, r, illum, waxing) {
+/* Which way the lit side faces.
+   The bright limb points at the Sun, so a crescent low in the west after sunset is
+   a bowl with its horns up, not the upright D this drew before. Rather than work
+   out a position angle and then fight the projection and the phone's roll for it,
+   step a little way from the Moon towards the Sun, project both, and read the
+   angle off the screen — which is correct in the dome, in the scope, and at
+   whatever angle the handset is being held. */
+function limbAngle(v, moon, sun, p) {
+  const m = unit(moon.alt, moon.az), s = unit(sun.alt, sun.az);
+  const d = m[0] * s[0] + m[1] * s[1] + m[2] * s[2];
+  let t = [s[0] - d * m[0], s[1] - d * m[1], s[2] - d * m[2]];
+  const n = Math.hypot(t[0], t[1], t[2]);
+  if (n < 1e-6) return 0;                            // Sun behind the Moon: any angle
+  t = [t[0] / n, t[1] / n, t[2] / n];
+  const step = 0.7 * D2R, cs = Math.cos(step), sn = Math.sin(step);
+  const q = [m[0] * cs + t[0] * sn, m[1] * cs + t[1] * sn, m[2] * cs + t[2] * sn];
+  const qa = Math.asin(Math.max(-1, Math.min(1, q[2]))) * R2D;
+  const qz = rev(Math.atan2(q[0], q[1]) * R2D);
+  const pq = project(qa, qz, v);
+  if (!pq) return 0;
+  return Math.atan2(pq[1] - p[1], pq[0] - p[0]);
+}
+
+function drawMoon(x, y, r, illum, waxing, angle) {
   const k = 1 - 2 * illum;                 // terminator ellipse half-width factor
   ctx.save();
   ctx.translate(x, y);
-  ctx.scale(waxing ? 1 : -1, 1);           // lit limb on the right when waxing
+  ctx.rotate(angle);                       // +x now points at the Sun
+  ctx.scale(waxing ? 1 : -1, 1);
 
+  /* earthshine: the dark side is lit by a gibbous Earth, and most obviously so
+     when the Moon itself is a thin crescent */
+  const ash = 0.05 + 0.16 * Math.pow(1 - illum, 2.2);
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, TAU);
-  ctx.fillStyle = "#191d2b";
+  ctx.fillStyle = "rgba(126,138,168," + ash.toFixed(3) + ")";
   ctx.fill();
 
   if (illum > 0.015) {
@@ -1945,7 +2076,7 @@ function drawMoon(x, y, r, illum, waxing) {
   }
   ctx.restore();
 
-  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.strokeStyle = "rgba(255,255,255,0.16)";
   ctx.lineWidth = 1;
   ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke();
 }
