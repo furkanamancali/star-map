@@ -2790,8 +2790,14 @@ function readOrientation(ev, absolute) {
   const wk = ev.webkitCompassHeading;
   const acc = ev.webkitCompassAccuracy;
   const alpha = ev.alpha;
-  const goodWk = typeof wk === "number" && !isNaN(wk) &&
-                 !(typeof acc === "number" && acc < 0);
+  /* A rough heading is still a heading. iOS reports accuracy -1 while the
+     magnetometer wants calibrating, which indoors can be most of the time, and that
+     reading is still referenced to north — it is the only absolute reference there
+     is. Refusing it and falling back to alpha means falling back to whichever way
+     the phone happened to face at page load, so accuracy only decides how quickly
+     the offset is trusted, never whether it is used at all. */
+  const goodWk = typeof wk === "number" && !isNaN(wk);
+  const rough = typeof acc !== "number" || acc < 0 || acc > 25;
 
   let heading;
   if (goodWk && alpha != null) {
@@ -2804,7 +2810,7 @@ function readOrientation(ev, absolute) {
       if (++headOutliers > 60) { headLock = delta; headOutliers = 0; }
     } else {
       headOutliers = 0;
-      headLock = rev(headLock + circDelta(headLock, delta) * 0.05);
+      headLock = rev(headLock + circDelta(headLock, delta) * (rough ? 0.02 : 0.05));
     }
     heading = rev(alpha + headLock);
     absHeading = true;
