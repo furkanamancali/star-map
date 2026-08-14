@@ -2280,7 +2280,13 @@ function stepTilt(dt) {
   S.center.az = rev(Math.atan2(S.dev.F[0], S.dev.F[1]) * R2D);
 }
 
-let tiltAbs = null, tiltRel = null, absSeen = false, warnedRelative = false;
+/* Two separate things, and conflating them froze the sky after one reading:
+   absStream is whether the deviceorientationabsolute *event* ever fired, which is
+   what decides which listener owns the feed; absHeading is whether the numbers are
+   referenced to true north. iOS never fires the absolute event, yet its readings
+   carry a true heading in webkitCompassHeading — so the one flag went up on the
+   first event and the plain listener then ignored every reading after it. */
+let tiltAbs = null, tiltRel = null, absStream = false, absHeading = false, warnedRelative = false;
 let wakeLock = null;
 
 function screenAngle() {
@@ -2313,9 +2319,9 @@ function readOrientation(ev, absolute) {
     scr: screenAngle(), abs: ev.absolute === true, kind: absolute ? "abs" : "rel"
   };
   if (heading == null) return;
-  if (absolute || (typeof wk === "number" && !isNaN(wk))) absSeen = true;
+  if (absolute || (typeof wk === "number" && !isNaN(wk))) absHeading = true;
   S.devTarget = deviceBasis(heading, ev.beta || 0, ev.gamma || 0, lastRaw.scr);
-  if (!absSeen && !warnedRelative) {
+  if (!absHeading && !warnedRelative) {
     warnedRelative = true;
     toast("No absolute compass here — drag sideways to line the sky up");
   }
@@ -2335,7 +2341,7 @@ window.addEventListener("unhandledrejection", ev => {
   lastError = "promise: " + ((ev.reason && ev.reason.message) || ev.reason || "?");
 });
 
-const BUILD = "b5";
+const BUILD = "b6";
 
 function envLine() {
   const DOE = window.DeviceOrientationEvent;
@@ -2365,7 +2371,7 @@ function updateSensor(now) {
 
   const r = lastRaw;
   el.textContent = r
-    ? "ev " + tiltEvents + " " + r.kind + (absSeen ? "/abs" : "/rel") +
+    ? "ev " + tiltEvents + " " + r.kind + (absHeading ? "/true" : "/rel") +
       "  α " + num(r.a, 1) + "  β " + num(r.b, 1) + "  γ " + num(r.g, 1) +
       "  wk " + num(r.wk, 1) + "  scr " + r.scr +
       "  →  alt " + num(S.center.alt, 1) + "  az " + num(S.center.az, 1) +
@@ -2375,15 +2381,17 @@ function updateSensor(now) {
 }
 
 function startTilt() {
-  absSeen = false;
+  absStream = false;
+  absHeading = false;
   tiltEvents = 0;
   tiltWatchdog = false;
   lastRaw = null;
   tiltStart = performance.now();
-  tiltAbs = ev => readOrientation(ev, true);
-  /* the plain event is the fallback; once an absolute one turns up it wins, since
-     a relative alpha would keep dragging the heading back to an arbitrary zero */
-  tiltRel = ev => { if (!absSeen) readOrientation(ev, ev.absolute === true); };
+  tiltAbs = ev => { absStream = true; readOrientation(ev, true); };
+  /* the plain event is the fallback, and it stands down only once the absolute
+     event has proved it is actually firing — never merely because a reading
+     happened to be absolute, which is the normal case on iOS */
+  tiltRel = ev => { if (!absStream) readOrientation(ev, ev.absolute === true); };
   window.addEventListener("deviceorientationabsolute", tiltAbs, true);
   window.addEventListener("deviceorientation", tiltRel, true);
 }
