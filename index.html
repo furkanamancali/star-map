@@ -440,39 +440,23 @@ input[type="range"]::-moz-range-thumb {
 
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 
-/* ---------- responsive ---------- */
-
-@media (max-width: 720px) {
-  #masthead { padding: 10px 13px 11px; max-width: calc(100vw - 28px); }
-  #masthead h1 { font-size: 22px; }
-  #readout { grid-template-columns: auto 1fr; }
-  #dossier {
-    top: auto;
-    bottom: 14px;
-    right: 14px;
-    left: 14px;
-    width: auto;
-  }
-  #deck { display: none; }
-  #deck.open { display: flex; }
-  #decktoggle { display: inline-flex; }
-  #arbtn { display: inline-flex; }
-  body:has(#deck.open) #arbtn { display: none; }
-  #toast { bottom: 76px; }
-}
+/* ---------- thumb controls ----------
+   These sit above the responsive block on purpose. A media query carries no extra
+   specificity, so anything defined after it would win at every width and the
+   buttons would stay hidden on the phones they exist for. */
 
 #decktoggle,
 #arbtn {
   display: none;
   position: fixed;
-  z-index: 11;
+  z-index: 12;
   bottom: 14px;
   right: 14px;
   align-items: center;
   gap: 6px;
   background: var(--panel);
   color: var(--ink);
-  padding: 9px 15px;
+  padding: 11px 16px;
 }
 
 #arbtn {
@@ -480,10 +464,15 @@ input[type="range"]::-moz-range-thumb {
   left: 14px;
 }
 
+#arbtn[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--void);
+}
+
 #sensor {
   display: none;
   position: fixed;
-  z-index: 11;
+  z-index: 12;
   left: 50%;
   transform: translateX(-50%);
   bottom: 62px;
@@ -502,18 +491,33 @@ input[type="range"]::-moz-range-thumb {
 #sensor.show { display: block; }
 
 @supports (padding: max(0px)) {
-  #sensor { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 48px); }
-}
-
-#arbtn[aria-pressed="true"] {
-  background: var(--ink);
-  color: var(--void);
-}
-
-/* keep both thumb buttons clear of the iOS home indicator */
-@supports (padding: max(0px)) {
   #decktoggle, #arbtn { bottom: max(14px, env(safe-area-inset-bottom)); }
+  #sensor { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 52px); }
 }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 720px) {
+  #masthead { padding: 10px 13px 11px; max-width: calc(100vw - 28px); }
+  #masthead h1 { font-size: 22px; }
+  #readout { grid-template-columns: auto 1fr; }
+  #dossier {
+    top: auto;
+    bottom: 68px;
+    right: 14px;
+    left: 14px;
+    width: auto;
+  }
+  #deck { display: none; }
+  #deck.open { display: flex; }
+  #decktoggle { display: inline-flex; }
+  #arbtn { display: inline-flex; }
+  #toast { bottom: 110px; }
+}
+
+/* the deck covers the screen when open, so the pointing button steps aside;
+   browsers without :has() simply keep both, which is harmless */
+body:has(#deck.open) #arbtn { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; }
@@ -2331,9 +2335,11 @@ window.addEventListener("unhandledrejection", ev => {
   lastError = "promise: " + ((ev.reason && ev.reason.message) || ev.reason || "?");
 });
 
+const BUILD = "b5";
+
 function envLine() {
   const DOE = window.DeviceOrientationEvent;
-  return "tilt:" + (S.tilt ? "on" : "off") +
+  return BUILD + " tilt:" + (S.tilt ? "on" : "off") +
     " DOE:" + (DOE ? "yes" : "NO") +
     " ask:" + (DOE && typeof DOE.requestPermission === "function" ? "yes" : "no") +
     " perm:" + permState +
