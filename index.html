@@ -473,9 +473,12 @@ input[type="range"]::-moz-range-thumb {
   #decktoggle, #arbtn { bottom: max(14px, env(safe-area-inset-bottom)); }
 }
 
-/* ---------- responsive ---------- */
+/* ---------- responsive ----------
+   Keyed on height as well as width: a phone turned on its side is about 844px
+   wide, so a width-only breakpoint hands it the desktop layout and takes the
+   thumb buttons away again at exactly the moment they are being held. */
 
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 520px) {
   #masthead { padding: 10px 13px 11px; max-width: calc(100vw - 28px); }
   #masthead h1 { font-size: 22px; }
   #readout { grid-template-columns: auto 1fr; }
@@ -491,6 +494,37 @@ input[type="range"]::-moz-range-thumb {
   #decktoggle { display: inline-flex; }
   #arbtn { display: inline-flex; }
   #toast { bottom: 110px; }
+}
+
+/* short viewports have roughly 390px of height to spend, and the deck alone can
+   ask for more than that, so anything that opens has to be able to scroll */
+@media (max-height: 520px) {
+  #masthead {
+    padding: 7px 11px 8px;
+    gap: 5px;
+    max-width: min(300px, calc(100vw - 28px));
+  }
+  #masthead h1 { font-size: 17px; }
+  #readout { font-size: 11px; row-gap: 2px; }
+  #deck {
+    max-height: calc(100vh - 76px);
+    max-height: calc(100dvh - 76px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  #dossier {
+    max-height: calc(100vh - 96px);
+    max-height: calc(100dvh - 96px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* landscape puts the notch on one edge, and fixed panels sit under it */
+  @supports (padding: max(0px)) {
+    #masthead { left: max(14px, env(safe-area-inset-left)); }
+    #dossier { right: max(14px, env(safe-area-inset-right)); }
+    #decktoggle { right: max(14px, env(safe-area-inset-right)); }
+    #arbtn { left: max(14px, env(safe-area-inset-left)); }
+  }
 }
 
 /* the deck covers the screen when open, so the pointing button steps aside;
