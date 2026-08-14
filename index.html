@@ -2772,15 +2772,56 @@ function syncTiltBtn() {
    under a phone that is lying still and sending nothing new */
 let tiltEvents = 0, tiltStart = 0, tiltWatchdog = false, lastRaw = null;
 
+/* shortest way round the circle, so 350 and 10 are twenty degrees apart */
+function circDelta(a, b) { return ((b - a + 540) % 360) - 180; }
+
+/* How the two iOS numbers get combined.
+   alpha is gyro-integrated: smooth, continuous, and referenced to wherever the
+   phone happened to point when the page loaded. webkitCompassHeading is referenced
+   to true north but is a horizontal projection, so it wobbles and drops out when
+   the phone is held up at the sky — exactly when this map is being used. Reading
+   whichever is available means that every dropout swaps between two zero points
+   and the sky leaps by the angle between them.
+   So: alpha carries the motion, and the compass only maintains the offset between
+   them, easing in slowly and ignoring brief disagreements. */
+let headLock = null, headOutliers = 0;
+
 function readOrientation(ev, absolute) {
-  /* iOS keeps true heading on its own property; its alpha is relative to whatever
-     way the phone happened to face when the page loaded */
   const wk = ev.webkitCompassHeading;
-  const heading = (typeof wk === "number" && !isNaN(wk)) ? 360 - wk : ev.alpha;
+  const acc = ev.webkitCompassAccuracy;
+  const alpha = ev.alpha;
+  const goodWk = typeof wk === "number" && !isNaN(wk) &&
+                 !(typeof acc === "number" && acc < 0);
+
+  let heading;
+  if (goodWk && alpha != null) {
+    const delta = rev(360 - wk - alpha);
+    if (headLock == null) {
+      headLock = delta;
+    } else if (Math.abs(circDelta(headLock, delta)) > 55) {
+      /* one wild reading is a glitch; a sustained one is the compass having
+         genuinely re-solved, and is worth following */
+      if (++headOutliers > 60) { headLock = delta; headOutliers = 0; }
+    } else {
+      headOutliers = 0;
+      headLock = rev(headLock + circDelta(headLock, delta) * 0.05);
+    }
+    heading = rev(alpha + headLock);
+    absHeading = true;
+  } else if (alpha != null && headLock != null) {
+    heading = rev(alpha + headLock);          // compass gone quiet; alpha carries on
+    absHeading = true;
+  } else if (goodWk) {
+    heading = 360 - wk;
+    absHeading = true;
+  } else {
+    heading = alpha;                          // Android relative, or nothing better
+    if (absolute) absHeading = true;
+  }
+
   tiltEvents++;
-  lastRaw = { a: ev.alpha, b: ev.beta, g: ev.gamma, wk: wk, scr: screenAngle() };
+  lastRaw = { a: alpha, b: ev.beta, g: ev.gamma, wk: wk, scr: screenAngle() };
   if (heading == null) return;
-  if (absolute || (typeof wk === "number" && !isNaN(wk))) absHeading = true;
   S.devTarget = deviceBasis(heading, ev.beta || 0, ev.gamma || 0, lastRaw.scr);
   if (!absHeading && !warnedRelative) {
     warnedRelative = true;
@@ -2800,6 +2841,8 @@ function tiltWatch(now) {
 function startTilt() {
   absStream = false;
   absHeading = false;
+  headLock = null;
+  headOutliers = 0;
   tiltEvents = 0;
   tiltWatchdog = false;
   lastRaw = null;
