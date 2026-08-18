@@ -3,7 +3,7 @@
    a handful of files. Serve them from cache first, since the point is a phone in a
    field with no signal, and refresh them in the background for the next launch. */
 
-const CACHE = "overhead-v1";
+const CACHE = "overhead-v2";
 
 const ASSETS = [
   "./",

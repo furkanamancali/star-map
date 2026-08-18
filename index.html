@@ -2888,7 +2888,20 @@ function circDelta(a, b) { return ((b - a + 540) % 360) - 180; }
    and the sky leaps by the angle between them.
    So: alpha carries the motion, and the compass only maintains the offset between
    them, easing in slowly and ignoring brief disagreements. */
-let headLock = null, headOutliers = 0;
+let headLock = null, headOutliers = 0, headProvisional = false;
+
+/* Which way round the compass reading came out.
+   webkitCompassHeading is the bearing of the phone's *top edge*, flattened onto
+   the horizontal. Pointing at anything above you means tilting the phone back
+   past vertical, and once it goes past, that top edge is aimed behind your head:
+   the flattened bearing turns through 180 degrees while the phone has not moved.
+   cos(beta) is the length of that projection, and its sign is which side of
+   vertical the edge fell. Near zero the projection is nearly nothing at all and
+   the bearing is noise, which is the other thing worth knowing. */
+function compassFrame(betaDeg) {
+  const cB = Math.cos((betaDeg || 0) * D2R);
+  return { base: cB < 0 ? 180 : 360, steady: Math.abs(cB) > 0.25 };
+}
 
 function readOrientation(ev, absolute) {
   const wk = ev.webkitCompassHeading;
@@ -2902,12 +2915,19 @@ function readOrientation(ev, absolute) {
      the offset is trusted, never whether it is used at all. */
   const goodWk = typeof wk === "number" && !isNaN(wk);
   const rough = typeof acc !== "number" || acc < 0 || acc > 25;
+  const cf = compassFrame(ev.beta);
 
   let heading;
   if (goodWk && alpha != null) {
-    const delta = rev(360 - wk - alpha);
-    if (headLock == null) {
+    const delta = rev(cf.base - wk - alpha);
+    if (headLock == null || (headProvisional && cf.steady)) {
+      /* a first lock taken through a near-vertical top edge is a guess; replace it
+         outright the moment a reading arrives that is worth something */
       headLock = delta;
+      headProvisional = !cf.steady;
+      headOutliers = 0;
+    } else if (!cf.steady) {
+      /* degenerate projection: ride on the offset already held */
     } else if (Math.abs(circDelta(headLock, delta)) > 55) {
       /* one wild reading is a glitch; a sustained one is the compass having
          genuinely re-solved, and is worth following */
@@ -2922,7 +2942,7 @@ function readOrientation(ev, absolute) {
     heading = rev(alpha + headLock);          // compass gone quiet; alpha carries on
     absHeading = true;
   } else if (goodWk) {
-    heading = 360 - wk;
+    heading = rev(cf.base - wk);
     absHeading = true;
   } else {
     heading = alpha;                          // Android relative, or nothing better
@@ -2930,7 +2950,7 @@ function readOrientation(ev, absolute) {
   }
 
   tiltEvents++;
-  lastRaw = { a: alpha, b: ev.beta, g: ev.gamma, wk: wk, scr: screenAngle() };
+  lastRaw = { a: alpha, b: ev.beta, g: ev.gamma, wk: wk, hd: heading, scr: screenAngle() };
   if (heading == null) return;
   S.devTarget = deviceBasis(heading, ev.beta || 0, ev.gamma || 0, lastRaw.scr);
   if (gyroRate && !gyroDead) judgeGyro(S.devTarget);
@@ -2954,6 +2974,7 @@ function startTilt() {
   absHeading = false;
   headLock = null;
   headOutliers = 0;
+  headProvisional = false;
   tiltEvents = 0;
   tiltWatchdog = false;
   lastRaw = null;
@@ -3010,8 +3031,9 @@ document.addEventListener("visibilitychange", () => {
    when the page itself turns under it */
 function reapplyScreenAngle() {
   if (!S.tilt || !lastRaw) return;
-  const wk = lastRaw.wk;
-  const heading = (typeof wk === "number" && !isNaN(wk)) ? 360 - wk : lastRaw.a;
+  /* the heading that was actually used, offset and all — recomputing it from the
+     raw compass here would throw away headLock and jump the sky sideways */
+  const heading = lastRaw.hd;
   if (heading == null) return;
   lastRaw.scr = screenAngle();
   S.devTarget = deviceBasis(heading, lastRaw.b || 0, lastRaw.g || 0, lastRaw.scr);
